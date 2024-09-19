@@ -34,10 +34,12 @@ spdlog_dep   = spdlog_proj.get_variable('spdlog_dep', 'external_fmt=false')
 lsap_proj  = subproject('scipy_lsap')
 lsap_dep   = lsap_proj.get_variable('liblsap_dep')
 
-stxxl_proj = subproject('stxxl')
-stxxl_dep  = stxxl_proj.get_variable('stxxl_dep')
-
 openmp = dependency('openmp')
+
+# Load stxxl as cmake dependency
+cmake = import('cmake')
+stxxl = cmake.subproject('stxxl')
+stxxl_dep = stxxl.dependency('stxxl')
 
 include_dirs = include_directories('.')
 
