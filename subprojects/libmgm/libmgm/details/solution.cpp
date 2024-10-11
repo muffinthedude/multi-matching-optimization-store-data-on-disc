@@ -25,6 +25,11 @@ GmSolution::GmSolution(std::shared_ptr<GmModel> model) {
     this->labeling = std::vector<int>(model->graph1.no_nodes, -1);
 }
 
+GmSolution::GmSolution(stxxl::external_shared_ptr<GmModel> model_ptr) {
+    this->model = std::make_shared<GmModel>(model_ptr.get());
+    this->labeling = std::vector<int>(model->graph1.no_nodes, -1);
+};
+
 bool GmSolution::is_active(AssignmentIdx assignment) const {
     return this->labeling[assignment.first] == assignment.second;
 }
@@ -37,8 +42,8 @@ double GmSolution::evaluate() const {
     int node = 0;
     for (const auto& label : this->labeling) {
         if (label >= 0) {
-            if (this->model->costs->contains(node, label)) {
-                result += this->model->costs->unary(node, label);
+            if (this->model->costs.get().contains(node, label)) {
+                result += this->model->costs.get().unary(node, label);
             }
             else {
                 return INFINITY_COST;
@@ -48,7 +53,7 @@ double GmSolution::evaluate() const {
     }
 
     //edges
-    for (const auto& [edge_idx, cost] : this->model->costs->all_edges()) {
+    for (const auto& [edge_idx, cost] : this->model->costs.get().all_edges()) {
         auto& a1 = edge_idx.first;
         auto& a2 = edge_idx.second;
         if (this->is_active(a1) && this->is_active(a2)) {

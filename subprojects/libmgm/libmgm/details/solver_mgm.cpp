@@ -340,8 +340,8 @@ CliqueMatcher::CliqueMatcher(const CliqueManager& manager_1, const CliqueManager
 
     GmModelIdx graph_pair_idx = (g1 < g2) ? GmModelIdx(g1, g2) : GmModelIdx(g2, g1);
 
-    size_t approximate_no_assignments_max = this->model.models.at(graph_pair_idx)->no_assignments;
-    size_t approximate_no_edges_max = this->model.models.at(graph_pair_idx)->no_edges;
+    size_t approximate_no_assignments_max = this->model.models.at(graph_pair_idx).get().no_assignments;
+    size_t approximate_no_edges_max = this->model.models.at(graph_pair_idx).get().no_edges;
 
     this->clique_assignments.reserve(approximate_no_assignments_max);
     this->clique_edges.reserve(approximate_no_edges_max);
@@ -397,7 +397,7 @@ void CliqueMatcher::collect_assignments() {
             int clique_g1 = -1, clique_g2 = -1;
 
             // Iterate over all assignments
-            for (const auto& a : m->assignment_list) {
+            for (const auto& a : m.get().assignment_list) {
                 if (is_sorted) {
                     clique_g1 = this->manager_1.clique_idx(g1, a.first);
                     clique_g2 = this->manager_2.clique_idx(g2, a.second);
@@ -408,7 +408,8 @@ void CliqueMatcher::collect_assignments() {
                 }
                 assert(clique_g1 >= 0);
                 assert(clique_g2 >= 0);
-                double cost = m->costs->unary(a);
+                auto temp = m.get().costs;
+                double cost = temp.get().unary(a);
 
                 // Store as an assignment between two cliques.
                 // Other graph pairs with an assignment in the same cliques may add a cost later.
@@ -451,7 +452,7 @@ void CliqueMatcher::collect_edges() {
             auto m = this->model.models.at(graph_pair_idx);
 
             // Iterate over all edges
-            for (const auto& [edge_idx, cost] : m->costs->all_edges()) {
+            for (const auto& [edge_idx, cost] : m.get().costs.get().all_edges()) {
                 AssignmentIdx a1    = edge_idx.first;
                 AssignmentIdx a2    = edge_idx.second;
                 

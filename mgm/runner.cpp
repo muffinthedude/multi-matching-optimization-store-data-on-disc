@@ -9,8 +9,7 @@
 Runner::Runner(ArgParser::Arguments args) : args(args) {
     spdlog::info("Loading model...");
 
-    auto mgmModel = mgm::io::parse_dd_file(args.input_file);
-    this->model = std::make_shared<mgm::MgmModel>(std::move(mgmModel));
+    this->model = mgm::io::parse_dd_file(args.input_file);
 
     // If run as a synchronizaiton algorithm, transform the model with the given solution.
     if (args.synchronize || args.synchronize_infeasible) {
@@ -23,7 +22,9 @@ Runner::Runner(ArgParser::Arguments args) : args(args) {
 
 mgm::MgmSolution Runner::run_seq() {
     auto solver = mgm::SequentialGenerator(model);
+    mgm::GmModel temp = solver.model->models[mgm::GmModelIdx(0, 1)].get();
     auto search_order = solver.init_generation_sequence(mgm::SequentialGenerator::matching_order::random);
+    mgm::GmModel temp2 = solver.model->models[mgm::GmModelIdx(0, 1)].get();
     solver.generate();
 
     return solver.export_solution();

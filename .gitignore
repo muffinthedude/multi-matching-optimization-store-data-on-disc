@@ -6,3 +6,7 @@ subprojects/pybind11*/
 packagecache/
 
 .vscode
+
+*.log
+
+*.errlog

@@ -23,6 +23,7 @@ std::shared_ptr<MgmModel> build_sync_problem(std::shared_ptr<MgmModel> model, Mg
         std::cout << i << "/" << model->models.size() << " \r";
         std::cout.flush();
 
+        const std::shared_ptr<GmModel>(gm_model);
         std::shared_ptr<GmModel> sync_gm_model;
 
         if (feasible) {
@@ -33,7 +34,7 @@ std::shared_ptr<MgmModel> build_sync_problem(std::shared_ptr<MgmModel> model, Mg
             // allow all assignments
             sync_gm_model = details::create_infeasible_sync_model(gm_model, solution.gmSolutions[key]);
         }
-        sync_model->models[key] = sync_gm_model;
+        sync_model->models.insert(std::make_pair(key, *sync_gm_model));
     }
 
     return sync_model;
@@ -57,7 +58,7 @@ std::shared_ptr<GmModel>  create_feasible_sync_model(std::shared_ptr<GmModel> mo
         if (solution.labeling[i] == -1)
             continue;
         
-        sync_model->costs->set_unary(i, solution.labeling[i], -1);
+        sync_model->costs.get().set_unary(i, solution.labeling[i], -1);
     }
 
     return sync_model;
@@ -81,7 +82,7 @@ std::shared_ptr<GmModel>  create_infeasible_sync_model(std::shared_ptr<GmModel> 
         if (solution.labeling[i] == -1)
             continue;
         
-        sync_model->costs->set_unary(i, solution.labeling[i], -1);
+        sync_model->costs.get().set_unary(i, solution.labeling[i], -1);
     }
 
     return sync_model;

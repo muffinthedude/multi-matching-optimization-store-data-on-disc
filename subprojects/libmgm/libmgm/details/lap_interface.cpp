@@ -25,7 +25,7 @@ LAPSolver::LAPSolver(std::shared_ptr<GmModel> model)
     this->costs.resize(this->nr_rows * this->nr_cols, INFINITY);
     
     // Copy assignment costs to flat vector.
-    for (auto & a : model->costs->all_assignments()) {
+    for (auto & a : model->costs.get().all_assignments()) {
         size_t idx = a.first.first * this->nr_cols + a.first.second;
         this->costs[idx] = a.second;
     }

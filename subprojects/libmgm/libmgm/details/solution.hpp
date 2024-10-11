@@ -15,6 +15,7 @@ class GmSolution {
     public:
         GmSolution() = default;
         GmSolution(std::shared_ptr<GmModel> model);
+        GmSolution(stxxl::external_shared_ptr<GmModel> model_ptr);
         std::vector<int> labeling;
 
         double evaluate() const;

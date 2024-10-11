@@ -44,7 +44,7 @@ class MgmGenerator {
         MgmSolution export_solution();
         CliqueTable export_CliqueTable();
         CliqueManager export_CliqueManager() const;
-
+        std::shared_ptr<MgmModel> model;
     protected:
         MgmGenerator(std::shared_ptr<MgmModel> model);
         virtual ~MgmGenerator() = default;
@@ -52,7 +52,7 @@ class MgmGenerator {
         virtual void generate() = 0;
 
         CliqueManager current_state;
-        std::shared_ptr<MgmModel> model;
+        
 };
 
 class SequentialGenerator : public MgmGenerator {

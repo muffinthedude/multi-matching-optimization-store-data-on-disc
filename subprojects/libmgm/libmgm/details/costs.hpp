@@ -37,7 +37,9 @@ struct EdgeIdxHash {
 };
 
 typedef ankerl::unordered_dense::map<AssignmentIdx, double, AssignmentIdxHash> AssignmentContainer;
+//typedef std::unordered_map<AssignmentIdx, double, AssignmentIdxHash> AssignmentContainer;
 typedef ankerl::unordered_dense::map<EdgeIdx, double, EdgeIdxHash> EdgeContainer;
+//typedef std::unordered_map<EdgeIdx, double, EdgeIdxHash> EdgeContainer;
 
 class CostMap {
     public:

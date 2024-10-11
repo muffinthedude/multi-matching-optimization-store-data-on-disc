@@ -64,7 +64,7 @@ void QAPSolver::construct_solver() {
 
         for (size_t idx = 0; idx < gm_node_assignments.size(); idx++) {
             int gm_label = gm_node_assignments[idx];
-            mpopt_qap_unary_set_cost(unary, idx, m->costs->unary(gm_node, gm_label));
+            mpopt_qap_unary_set_cost(unary, idx, m->costs.get().unary(gm_node, gm_label));
         }
         mpopt_qap_unary_set_cost(unary, gm_node_assignments.size(), 0.0); // dummy node
     }
@@ -174,7 +174,7 @@ ModelDecomposition::ModelDecomposition(const GmModel& model) {
 
     // add pairwise edges
     this->pairwise.reserve(model.graph1.no_nodes);
-    for (const auto& edge : model.costs->all_edges()) {
+    for (const auto& edge : model.costs.get().all_edges()) {
         insert_pairwise(model, edge.first, edge.second);
     }
 

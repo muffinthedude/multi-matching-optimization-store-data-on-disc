@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <getopt.h>
 #include <CLI/CLI.hpp>
+#include <libmgm/mgm.hpp>
 
 namespace fs = std::filesystem;
 
@@ -35,6 +36,7 @@ class ArgParser {
             improveopt,
             improveopt_par
         };
+
         enum disc_save_mode {
             no,
             stxxl,
