@@ -1,43 +1,48 @@
-project('multi-matching-optimization', 
-        ['cpp'], 
-        default_options: 
-          ['cpp_std=c++17', 
-          'buildtype=debugoptimized', 
-          'warning_level=3'])
+# meson commands cheat sheet:
+#
+# # Setup ###################
+#
+# release & debug setup
+#      CXX="ccache clang++" meson setup --buildtype release builddir/clang_release
+#      CXX="ccache clang++" meson setup builddir/clang_debug
+# c++20 build
+#     CXX="ccache clang++" meson setup -Dcpp_std=c++20 builddir/clang_cpp20
+# lcov coverage:
+#     CXX="ccache clang++" meson setup -Db_coverage=true builddir/coverage
+#     ninja clean && ninja test && ninja coverage
+#
+# # Testing ################
+#
+# Run with valgrind:
+#     meson test --wrap='valgrind --leak-check=full --error-exitcode=1'
+#
 
-sources =  [
-  'mgm/main.cpp',
-  'mgm/argparser.cpp',
-  'mgm/runner.cpp'
-]
+project('unordered_dense', 'cpp',
+    version: '4.1.2',
+    license: 'MIT',
+    default_options : [
+        'cpp_std=c++17', 
+        'warning_level=3',
+        'werror=true', 
+        'b_ndebug=true', # otherwise absl is really slow!
+    ])
 
-libmgm_proj  = subproject('libmgm')
-libmgm_dep   = libmgm_proj.get_variable('libmgm_dep')
+#
+# Dependencies.
+#
 
-libqpbo_proj  = subproject('libqpbo')
-libqpbo_dep   = libqpbo_proj.get_variable('libqpbo_dep')
+cereal_proj  = subproject('cereal')
+cereal_dep   = cereal_proj.get_variable('cereal_dep')
 
-libmpopt_proj  = subproject('libmpopt')
-libmpopt_dep   = libmpopt_proj.get_variable('libmpopt_dep')
+incdir = include_directories('include')
+unordered_dense = static_library(
+    'unordered',
+    include_directories: incdir,
+    dependencies: [cereal_dep],
+    install: false
+)
+unordered_dense_dep = declare_dependency(
+    include_directories: incdir, link_with: unordered_dense, dependencies: [cereal_dep]
+)
+#subdir('test')
 
-json_proj  = subproject('nlohmann_json')
-json_dep   = json_proj.get_variable('nlohmann_json_dep')
-
-unordered_dense  = subproject('unordered_dense')
-unordered_dense_dep   = unordered_dense.get_variable('unordered_dense_dep')
-
-cli11_proj  = subproject('cli11')
-cli11_dep   = cli11_proj.get_variable('CLI11_dep')
-
-spdlog_proj  = subproject('spdlog')
-spdlog_dep   = spdlog_proj.get_variable('spdlog_dep', 'external_fmt=false')
-
-lsap_proj  = subproject('scipy_lsap')
-lsap_dep   = lsap_proj.get_variable('liblsap_dep')
-
-stxxl_proj = subproject('stxxl')
-stxxl_dep  = stxxl_proj.get_variable('stxxl_dep')
-
-executable('mgm',
-  sources,
-  dependencies : [libmgm_dep, libqpbo_dep, libmpopt_dep, spdlog_dep, json_dep, cli11_dep, unordered_dense_dep, lsap_dep, stxxl_dep])
