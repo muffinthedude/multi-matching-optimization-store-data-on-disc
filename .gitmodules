@@ -12,3 +12,6 @@
 [submodule "subprojects/scipy_lsap"]
 	path = subprojects/scipy_lsap
 	url = https://github.com/sebastianstricker/scipy_lsap.git
+[submodule "subprojects/rocksdb"]
+	path = subprojects/rocksdb
+	url = https://github.com/muffinthedude/rocksdb.git
