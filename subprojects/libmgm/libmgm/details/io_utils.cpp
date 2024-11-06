@@ -27,8 +27,16 @@ const std::regex re_p("^p ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$");
 const std::regex re_a("^a ([0-9]+) ([0-9]+) ([0-9]+) (.+)$");
 const std::regex re_e("^e ([0-9]+) ([0-9]+) (.+)$");
 
-MgmModel parse_dd_file(fs::path dd_file) {
-    auto model = MgmModel();
+std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode save_mode) {
+    std::shared_ptr<MgmModelBase> model;
+    switch (save_mode) {
+        case disc_save_mode::no:
+            model = std::make_shared<MgmModel>();
+        case disc_save_mode::sql:
+            model = std::make_shared<SqlMgmModel>();
+        default:
+            model = std::make_shared<MgmModel>();
+    }
 
     std::ifstream infile(dd_file);
     std::string line; 
@@ -42,7 +50,7 @@ MgmModel parse_dd_file(fs::path dd_file) {
             int g2_id = std::stoi(re_match[2]);
             if (g2_id > max_graph_id) {
                 max_graph_id = g2_id;
-                model.graphs.resize(max_graph_id+1);
+                model->graphs.resize(max_graph_id+1);
             }
             spdlog::info("Graph {} and Graph {}", g1_id, g2_id);
 
@@ -60,8 +68,8 @@ MgmModel parse_dd_file(fs::path dd_file) {
             //FIXME: graphs with same id initialized multiple times over.
             Graph g1(g1_id, no_left);
             Graph g2(g2_id, no_right);
-            model.graphs[g1_id] = g1;
-            model.graphs[g2_id] = g2;
+            model->graphs[g1_id] = g1;
+            model->graphs[g2_id] = g2;
 
             GmModel gmModel(g1, g2, no_a, no_e);
 
@@ -91,16 +99,17 @@ MgmModel parse_dd_file(fs::path dd_file) {
             }
 
             GmModelIdx idx(g1_id, g2_id);
-            model.models[idx] = std::make_shared<GmModel>(std::move(gmModel));
+            model->save_gm_model(gmModel, idx);
+            model->model_keys.push_back(idx);
         }
     }
-    model.no_graphs = max_graph_id + 1;
+    model->no_graphs = max_graph_id + 1;
 
     spdlog::info("Finished parsing model.\n");
     return model;
 }
 
-MgmModel parse_dd_file_fscan(fs::path dd_file) {
+std::shared_ptr<MgmModelBase> parse_dd_file_fscan(fs::path dd_file) {
     auto model = MgmModel();
 
     FILE* infile;
@@ -170,12 +179,13 @@ MgmModel parse_dd_file_fscan(fs::path dd_file) {
         }
 
         GmModelIdx idx(g1_id, g2_id);
-        model.models[idx] = std::make_shared<GmModel>(std::move(gmModel));
+        model.save_gm_model(gmModel, idx);
     }
     model.no_graphs = max_graph_id + 1;
 
     fclose(infile);
-    return model;
+    std::shared_ptr<MgmModelBase> model_ptr = std::make_shared<MgmModel>(model);
+    return model_ptr;
 }
 
 json null_valued_labeling(std::vector<int> l) {
@@ -207,7 +217,8 @@ void safe_to_disk(const MgmSolution& solution, fs::path outPath, std::string fil
     for (auto const& [key, s] : solution.gmSolutions) {
         json json_labeling = null_valued_labeling(s.labeling);
 
-        std::string key_string = fmt::format("{}, {}", s.model->graph1.id, s.model->graph2.id);
+        std::shared_ptr<GmModel> gmModel = solution.model->get_gm_model(key);
+        std::string key_string = fmt::format("{}, {}", gmModel->graph1.id, gmModel->graph2.id);
         j["labeling"][key_string] = json_labeling; 
     }
 
@@ -227,7 +238,7 @@ GmModelIdx from_json(const std::string input) {
     return GmModelIdx(std::stoi(g1), std::stoi(g2));
 }
 
-MgmSolution import_from_disk(std::shared_ptr<MgmModel> model, fs::path labeling_path) {
+MgmSolution import_from_disk(std::shared_ptr<MgmModelBase> model, fs::path labeling_path) {
     MgmSolution s(model);
 
     spdlog::info("Parsing json");
