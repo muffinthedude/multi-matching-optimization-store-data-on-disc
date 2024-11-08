@@ -34,6 +34,8 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             model = std::make_shared<MgmModel>();
         case disc_save_mode::sql:
             model = std::make_shared<SqlMgmModel>();
+        case disc_save_mode::rocksdb:
+            model = std::make_shared<RocksdbMgmModel>();
         default:
             model = std::make_shared<MgmModel>();
     }

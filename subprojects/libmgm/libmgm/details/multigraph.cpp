@@ -148,7 +148,7 @@ void SqlMgmModel::delete_table() {
     sqlite3_finalize(delete_statement);
 }
 
-void SqlMgmModel::save_model_to_db(const GmModel& gm_model, const GmModelIdx& idx) {
+void SqlMgmModel::save_model_to_db(GmModel& gm_model, const GmModelIdx& idx) {
     // bind statement
     int rc = sqlite3_bind_int(this->insert_stmt, 1, idx.first);
     if (rc != SQLITE_OK) {
@@ -161,7 +161,8 @@ void SqlMgmModel::save_model_to_db(const GmModel& gm_model, const GmModelIdx& id
         exit(1);
     }
     std::string serialized_model;
-    gm_model.serialize_to_binary(serialized_model);
+    std::shared_ptr<GmModel> gmModelPtr = std::make_shared<GmModel>(std::move(gm_model));
+    serialize_to_binary(serialized_model, gmModelPtr);
     rc = sqlite3_bind_blob(this->insert_stmt, 3, serialized_model.data(), serialized_model.size(), SQLITE_STATIC);
     if (rc != SQLITE_OK) {
         std::cerr << "Failed to bind blob: " << sqlite3_errmsg(db) << std::endl;
@@ -194,19 +195,29 @@ std::shared_ptr<GmModel> SqlMgmModel::read_model_from_db(const GmModelIdx& idx) 
         std::cerr << "No data found!" << "\n";
     }
     rc = sqlite3_reset(this->read_stmt);
-    GmModel gmModel;
-    this->deserialize_serialized_model(read_serialized_model, gmModel);
-    std::shared_ptr<GmModel> model_ptr = std::make_shared<GmModel>(std::move(gmModel));
-    return model_ptr;
+    std::shared_ptr<GmModel> gmModelPtr;
+    deserialize_serialized_model(read_serialized_model, gmModelPtr);
+    return gmModelPtr;
 }
 
-void SqlMgmModel::deserialize_serialized_model(std::string& serialized_model, GmModel& model) {
+void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModel> gmModel) {
+    std::ostringstream output_stream;
+        {
+            
+            cereal::BinaryOutputArchive OArchive(output_stream);
+            OArchive(gmModel);
+            
+        }
+    result_string = output_stream.str();
+}
+
+void deserialize_serialized_model(std::string& serialized_model, std::shared_ptr<GmModel> gmModel) {
     std::istringstream iss(serialized_model);
     cereal::BinaryInputArchive iarchive(iss);
-    iarchive(model); 
+    iarchive(gmModel); 
 }
 
-SqlMgmModel::SqlMgmModel(): db() {
+SqlMgmModel::SqlMgmModel() {
     this->db = open_db();
     this->create_table();
     this->set_up_write_statement();
@@ -230,6 +241,59 @@ SqlMgmModel& SqlMgmModel::operator=(SqlMgmModel&& other) {
         db = std::move(other.db);               // Move the unique pointer
     }
     return *this;
+}
+
+// RocksSqlMgmModel
+
+RocksdbMgmModel::RocksdbMgmModel() {
+    this->open_db();
+    this->write_options = rocksdb::WriteOptions();
+    this->read_options = rocksdb::ReadOptions();
+}
+
+void RocksdbMgmModel::save_gm_model(GmModel& gm_model, const GmModelIdx& idx) {
+    std::string serialized_model;
+    std::shared_ptr<GmModel> gmModelPtr = std::make_shared<GmModel>(std::move(gm_model));
+    serialize_to_binary(serialized_model, gmModelPtr);
+    rocksdb::Status status = db->Put(this->write_options, this->convert_idx_into_string(idx), serialized_model);
+    if (!status.ok()) {
+        std::cerr << "Failed to write binary data to database: " << status.ToString() << std::endl;
+        delete db;
+        return;
+    }
+}
+
+std::shared_ptr<GmModel> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
+    std::string retrieved_serialized_model;
+    rocksdb::Status status = db->Get(this->read_options, this->convert_idx_into_string(idx), &retrieved_serialized_model);
+    if (!status.ok()) {
+        std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
+    }
+    std::shared_ptr<GmModel> gmModel;
+    deserialize_serialized_model(retrieved_serialized_model, gmModel);
+    return gmModel;
+}
+
+void RocksdbMgmModel::open_db() {
+    rocksdb::Options options;
+    options.create_if_missing = true;
+    rocksdb::Status status = rocksdb::DB::Open(options, "modelsdb", &(this->db));
+    if (!status.ok()) {
+        std::cerr << "Failed to open RocksDB at path 'modelsdb': " << status.ToString() << std::endl;
+        exit(1);
+    }
+}
+
+std::string RocksdbMgmModel::convert_idx_into_string(const GmModelIdx& idx) const {
+    return std::to_string(idx.first) + "," + std::to_string(idx.second);
+}
+
+RocksdbMgmModel::~RocksdbMgmModel() {
+    delete this->db;
+    rocksdb::Status status = rocksdb::DestroyDB("modelsdb", rocksdb::Options());
+    if (!status.ok()) {
+        std::cerr << "Error deleting database: " << status.ToString() << std::endl;
+    }
 }
 
 }
