@@ -41,11 +41,15 @@ cereal_dep = cereal_proj.get_variable('cereal_dep')
 sqlite3_proj = subproject('sqlite3')
 sqlite3_dep = sqlite3_proj.get_variable('sqlite3_dep')
 
+openmp = dependency('openmp')
+
 # Load stxxl as cmake dependency
 cmake = import('cmake')
 rocksdb = cmake.subproject('rocksdb')
 rocksdb_dep = rocksdb.dependency('rocksdb')
+stxxl = cmake.subproject('stxxl')
+stxxl_dep = stxxl.dependency('stxxl')
 
 executable('mgm',
   sources,
-  dependencies : [libmgm_dep, libqpbo_dep, libmpopt_dep, spdlog_dep, json_dep, cli11_dep, unordered_dense_dep, lsap_dep, cereal_dep, sqlite3_dep, rocksdb_dep])
+  dependencies : [libmgm_dep, libqpbo_dep, libmpopt_dep, spdlog_dep, json_dep, cli11_dep, unordered_dense_dep, lsap_dep, cereal_dep, sqlite3_dep, rocksdb_dep, openmp, stxxl_dep])
