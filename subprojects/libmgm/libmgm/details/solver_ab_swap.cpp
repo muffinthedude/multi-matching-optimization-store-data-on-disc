@@ -310,7 +310,7 @@ double CliqueSwapper::star_flip_cost(int id_graph1, int id_graph2, int alpha1, i
     auto new_assignment_1 = AssignmentIdx(alpha1, beta2);
     auto new_assignment_2 = AssignmentIdx(beta1, alpha2);
 
-    auto& assignments = m->costs->all_assignments();
+    auto& assignments = m->get_costs()->all_assignments();
     if (alpha1 != -1) {
         if(alpha2 != -1) 
             cost -= get_flip_cost(old_assignment_1, assignments);
@@ -325,7 +325,7 @@ double CliqueSwapper::star_flip_cost(int id_graph1, int id_graph2, int alpha1, i
     }
     
     // pairwise
-    auto& edges = m->costs->all_edges();
+    auto& edges = m->get_costs()->all_edges();
     for (const auto & c : this->current_state) {
         auto g1_it = c.find(id_graph1);
         if(g1_it == c.end())

@@ -408,7 +408,7 @@ void CliqueMatcher::collect_assignments() {
                 }
                 assert(clique_g1 >= 0);
                 assert(clique_g2 >= 0);
-                double cost = m->costs->unary(a);
+                double cost = m->get_costs()->unary(a);
 
                 // Store as an assignment between two cliques.
                 // Other graph pairs with an assignment in the same cliques may add a cost later.
@@ -451,7 +451,7 @@ void CliqueMatcher::collect_edges() {
             auto m = this->model->get_gm_model(graph_pair_idx);
 
             // Iterate over all edges
-            for (const auto& [edge_idx, cost] : m->costs->all_edges()) {
+            for (const auto& [edge_idx, cost] : m->get_costs()->all_edges()) {
                 AssignmentIdx a1    = edge_idx.first;
                 AssignmentIdx a2    = edge_idx.second;
                 

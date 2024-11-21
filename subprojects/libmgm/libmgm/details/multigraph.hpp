@@ -10,6 +10,8 @@
 #include <sqlite3.h>
 #include <rocksdb/db.h>
 #include <cereal/types/memory.hpp>
+#include <stxxl.h> 
+#include <stxxl/bits/common/external_shared_ptr.h>
 
 #include "costs.hpp"
 
@@ -40,15 +42,37 @@ class Graph {
         }
 };
 
-class GmModel{
+class GmModelBase {
     public:
-        GmModel() {};
-        GmModel(Graph g1, Graph g2, int no_assignments, int no_edges);
+        GmModelBase() {};
+        GmModelBase(Graph g1, Graph g2, int no_assignments, int no_edges);
+
+        virtual ~GmModelBase() = default;
         Graph graph1;
         Graph graph2;
 
         int no_assignments;
         int no_edges;
+
+        virtual std::shared_ptr<CostMap> get_costs() = 0;
+
+        virtual void add_assignment(int assignment_id, int node1, int node2, double cost) = 0;
+
+        // both valid alternatives.
+        virtual void add_edge(int assignment1, int assigment2, double cost) = 0;
+        virtual void add_edge(int assignment1_node1, int assignment1_node2, int assignment2_node1, int assignment2_node2, double cost) = 0;
+
+        std::vector<AssignmentIdx> assignment_list;
+        std::vector<std::vector<int>> assignments_left;
+        std::vector<std::vector<int>> assignments_right;
+};
+
+class GmModel: public GmModelBase{
+    public:
+        GmModel() {};
+        GmModel(Graph g1, Graph g2, int no_assignments, int no_edges);
+
+        std::shared_ptr<CostMap> get_costs();
 
         void add_assignment(int assignment_id, int node1, int node2, double cost);
 
@@ -56,10 +80,7 @@ class GmModel{
         void add_edge(int assignment1, int assigment2, double cost);
         void add_edge(int assignment1_node1, int assignment1_node2, int assignment2_node1, int assignment2_node2, double cost);
 
-        std::vector<AssignmentIdx> assignment_list;
-        std::vector<std::vector<int>> assignments_left;
-        std::vector<std::vector<int>> assignments_right;
-        std::unique_ptr<CostMap> costs;
+        std::shared_ptr<CostMap> costs;
 
         template <class Archive>
         void serialize(Archive& archive) {
@@ -73,40 +94,65 @@ class GmModel{
         
 };
 
-void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModel> gmModel);
-void deserialize_serialized_model(std::string& serialized_model, std::shared_ptr<GmModel> model);
+void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase> gmModel);
+void deserialize_serialized_model(std::string& serialized_model, std::shared_ptr<GmModelBase> model);
+
+typedef std::shared_ptr<CostMap> costmap_ptr;
+typedef stxxl::external_shared_ptr<costmap_ptr> external_costs;
+
+class StxxlGmModel: public GmModelBase{
+    public:
+        StxxlGmModel() {};
+        StxxlGmModel(Graph g1, Graph g2, int no_assignments, int no_edges);
+
+        void add_assignment(int assignment_id, int node1, int node2, double cost);
+
+        // both valid alternatives.
+        void add_edge(int assignment1, int assigment2, double cost);
+        void add_edge(int assignment1_node1, int assignment1_node2, int assignment2_node1, int assignment2_node2, double cost);
+
+        std::shared_ptr<CostMap> get_costs();
+
+        external_costs costs;
+
+};
+
 
 class MgmModelBase {
     public: 
         virtual ~MgmModelBase() = default;
-        virtual void save_gm_model(GmModel& gm_model, const GmModelIdx& idx) = 0;
-        virtual std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx) = 0;
+        virtual void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) = 0;
+        virtual std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx) = 0;
 
         int no_graphs;
         std::vector<Graph> graphs;
         
-        std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> models;
-        std::vector<GmModelIdx> model_keys;
+        std::vector<GmModelIdx> model_keys;  // maybe use other data structure here to make sure same key is not saved multiple times (set?)
     
 };
 
 class MgmModel: public MgmModelBase{
     public:
-        void save_gm_model(GmModel& gm_model, const GmModelIdx& idx);
-        std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
+        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
+        std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx);
         
         MgmModel();
+
+        std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> models;
+
 };
 
 class SqlMgmModel: public MgmModelBase {
     public:
         SqlMgmModel();
 
-        void save_gm_model(GmModel& gm_model, const GmModelIdx& idx);
-        std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
+        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
+        std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx);
         
-        void save_model_to_db(GmModel& gm_model, const GmModelIdx& idx);
-        std::shared_ptr<GmModel> read_model_from_db(const GmModelIdx& idx);
+        void save_model_to_db(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
+        std::shared_ptr<GmModelBase> read_model_from_db(const GmModelIdx& idx);
+
+        std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> models;
 
         // Rule of five
         ~SqlMgmModel();
@@ -133,10 +179,12 @@ class SqlMgmModel: public MgmModelBase {
 class RocksdbMgmModel: public MgmModelBase {
     public:
         RocksdbMgmModel();
-        void save_gm_model(GmModel& gm_model, const GmModelIdx& idx);
-        std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
+        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
+        std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx);
 
         ~RocksdbMgmModel();
+
+        std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> models;
     
     private:
         void open_db();
@@ -146,5 +194,45 @@ class RocksdbMgmModel: public MgmModelBase {
         rocksdb::WriteOptions write_options;
         rocksdb::ReadOptions read_options;
 };
+
+// stxxl 
+
+struct CompareLess
+{
+ bool operator () (const GmModelIdx & a, const GmModelIdx & b) const
+ { 
+    return (a.first != b.first and a.first < b.first) or (a.first == b.first and a.second < b.second);
+}
+ static GmModelIdx min_value() { return GmModelIdx(std::numeric_limits<int>::min(), std::numeric_limits<int>::min()); }
+ static GmModelIdx max_value() { return GmModelIdx(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()); }
+};
+
+typedef std::shared_ptr<GmModelBase> gm_model_base_ptr;
+typedef stxxl::external_shared_ptr<gm_model_base_ptr> external_gm_model;
+
+#define SUB_BLOCK_SIZE 8192
+#define SUB_BLOCKS_PER_BLOCK 256
+ // template parameter <KeyType, MappedType, HashType, CompareType, SubBlockSize, SubBlocksPerBlock>
+ typedef stxxl::unordered_map<
+GmModelIdx, external_gm_model, GmModelIdxHash, CompareLess, SUB_BLOCK_SIZE, SUB_BLOCKS_PER_BLOCK
+ > unordered_map_type;
+
+class stxxl_unordered_map : public unordered_map_type                                             
+{
+public:
+    external_gm_model& at(const GmModelIdx);
+    const external_gm_model& at(const GmModelIdx) const;
+};
+
+class StxxlMgmModel: public MgmModelBase {
+    public:
+        StxxlMgmModel() {};
+        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
+        std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx);
+
+        stxxl_unordered_map models;
+
+};
+
 }
 #endif

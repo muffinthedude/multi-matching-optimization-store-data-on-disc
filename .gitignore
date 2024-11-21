@@ -11,3 +11,4 @@ packagecache/
 *.log
 *.json
 *.db
+*.errlog
