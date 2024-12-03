@@ -32,14 +32,19 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
     switch (save_mode) {
         case disc_save_mode::no:
             model = std::make_shared<MgmModel>();
+            break;
         case disc_save_mode::sql:
             model = std::make_shared<SqlMgmModel>();
+            break;
         case disc_save_mode::rocksdb:
             model = std::make_shared<RocksdbMgmModel>();
+            break;
         case disc_save_mode::stxxl:
             model = std::make_shared<StxxlMgmModel>();
+            break;
         default:
             model = std::make_shared<MgmModel>();
+            break;
     }
 
     std::ifstream infile(dd_file);
@@ -79,8 +84,10 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             switch (save_mode) {
                 case disc_save_mode::stxxl:
                     gmModel = std::make_shared<StxxlGmModel>(g1, g2, no_a, no_e);
+                    break;
                 default:
                     gmModel = std::make_shared<GmModel>(g1, g2, no_a, no_e);
+                    break;
             }
             
             int ass_id = 0;

@@ -6,6 +6,7 @@ subprojects/cereal*/
 subprojects/sqlite*/
 
 packagecache/
+modelsdb/
 
 .vscode
 *.log

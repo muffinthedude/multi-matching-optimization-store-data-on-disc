@@ -12,6 +12,9 @@
 #include <cereal/types/memory.hpp>
 #include <stxxl.h> 
 #include <stxxl/bits/common/external_shared_ptr.h>
+#include <cereal/types/polymorphic.hpp>
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/base_class.hpp>
 
 #include "costs.hpp"
 
@@ -65,6 +68,14 @@ class GmModelBase {
         std::vector<AssignmentIdx> assignment_list;
         std::vector<std::vector<int>> assignments_left;
         std::vector<std::vector<int>> assignments_right;
+
+        template <class Archive>
+        void serialize(Archive& archive) {
+            archive(
+                this->assignment_list, this->assignments_left, this->assignments_right, 
+                this->graph1, this->graph2, this->no_assignments, this->no_edges
+                );
+        }
 };
 
 class GmModel: public GmModelBase{
@@ -85,8 +96,7 @@ class GmModel: public GmModelBase{
         template <class Archive>
         void serialize(Archive& archive) {
             archive(
-                this->assignment_list, this->assignments_left, this->assignments_right, this->costs,
-                this->graph1, this->graph2, this->no_assignments, this->no_edges
+                cereal::base_class<GmModelBase>(this), this->costs
                 );
         }
         void serialize_to_binary(std::string& result_string) const;
@@ -95,7 +105,7 @@ class GmModel: public GmModelBase{
 };
 
 void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase> gmModel);
-void deserialize_serialized_model(std::string& serialized_model, std::shared_ptr<GmModelBase> model);
+std::shared_ptr<GmModelBase> deserialize_serialized_model(std::string& serialized_model);
 
 typedef std::shared_ptr<CostMap> costmap_ptr;
 typedef stxxl::external_shared_ptr<costmap_ptr> external_costs;
@@ -146,7 +156,7 @@ class SqlMgmModel: public MgmModelBase {
     public:
         SqlMgmModel();
 
-        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
+        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) override;
         std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx);
         
         void save_model_to_db(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
@@ -235,4 +245,12 @@ class StxxlMgmModel: public MgmModelBase {
 };
 
 }
+
+CEREAL_REGISTER_TYPE(mgm::GmModel)
+
+CEREAL_REGISTER_TYPE(mgm::SqlMgmModel)
+CEREAL_REGISTER_POLYMORPHIC_RELATION(mgm::MgmModelBase, mgm::SqlMgmModel)
+
+CEREAL_REGISTER_TYPE(mgm::RocksdbMgmModel)
+CEREAL_REGISTER_POLYMORPHIC_RELATION(mgm::MgmModelBase, mgm::RocksdbMgmModel)
 #endif

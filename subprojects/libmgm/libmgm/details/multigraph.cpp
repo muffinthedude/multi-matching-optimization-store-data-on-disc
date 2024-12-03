@@ -4,7 +4,6 @@
 #include <cassert>
 #include <fstream>
 #include <cstdlib>
-#include <cereal/archives/binary.hpp>
 
 namespace mgm {
     
@@ -243,8 +242,7 @@ std::shared_ptr<GmModelBase> SqlMgmModel::read_model_from_db(const GmModelIdx& i
         std::cerr << "No data found!" << "\n";
     }
     rc = sqlite3_reset(this->read_stmt);
-    std::shared_ptr<GmModel> gmModelPtr;
-    deserialize_serialized_model(read_serialized_model, gmModelPtr);
+    std::shared_ptr<GmModelBase> gmModelPtr = deserialize_serialized_model(read_serialized_model);
     return gmModelPtr;
 }
 
@@ -259,10 +257,14 @@ void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase
     result_string = output_stream.str();
 }
 
-void deserialize_serialized_model(std::string& serialized_model, std::shared_ptr<GmModelBase> gmModel) {
-    std::istringstream iss(serialized_model);
-    cereal::BinaryInputArchive iarchive(iss);
-    iarchive(gmModel); 
+std::shared_ptr<GmModelBase> deserialize_serialized_model(std::string& serialized_model) {
+    std::shared_ptr<GmModelBase> gmModel;
+    {
+        std::istringstream iss(serialized_model);
+        cereal::BinaryInputArchive iarchive(iss);
+        iarchive(gmModel); 
+    }
+    return gmModel;
 }
 
 SqlMgmModel::SqlMgmModel() {
@@ -317,8 +319,7 @@ std::shared_ptr<GmModelBase> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx
     if (!status.ok()) {
         std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
     }
-    std::shared_ptr<GmModelBase> gmModel;
-    deserialize_serialized_model(retrieved_serialized_model, gmModel);
+    std::shared_ptr<GmModelBase> gmModel = deserialize_serialized_model(retrieved_serialized_model);
     return gmModel;
 }
 
