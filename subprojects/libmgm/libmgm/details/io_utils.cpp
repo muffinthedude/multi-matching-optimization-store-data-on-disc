@@ -32,12 +32,19 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
     switch (save_mode) {
         case disc_save_mode::no:
             model = std::make_shared<MgmModel>();
+            break;
         case disc_save_mode::sql:
             model = std::make_shared<SqlMgmModel>();
+            break;
         case disc_save_mode::rocksdb:
             model = std::make_shared<RocksdbMgmModel>();
+            break;
+        case disc_save_mode::stxxl:
+            model = std::make_shared<StxxlMgmModel>();
+            break;
         default:
             model = std::make_shared<MgmModel>();
+            break;
     }
 
     std::ifstream infile(dd_file);
@@ -73,8 +80,16 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             model->graphs[g1_id] = g1;
             model->graphs[g2_id] = g2;
 
-            GmModel gmModel(g1, g2, no_a, no_e);
-
+            std::shared_ptr<GmModelBase> gmModel;
+            switch (save_mode) {
+                case disc_save_mode::stxxl:
+                    gmModel = std::make_shared<StxxlGmModel>(g1, g2, no_a, no_e);
+                    break;
+                default:
+                    gmModel = std::make_shared<GmModel>(g1, g2, no_a, no_e);
+                    break;
+            }
+            
             int ass_id = 0;
             int id1 = 0;
             int id2 = 0;
@@ -87,7 +102,7 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
                 lineStream.str(line.substr(2));
                 lineStream >> ass_id >> id1 >> id2 >> c;
 
-                gmModel.add_assignment(ass_id, id1, id2, c);
+                gmModel->add_assignment(ass_id, id1, id2, c);
             }
 
             // Edges
@@ -97,12 +112,11 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
                 lineStream.str(line.substr(2));
                 lineStream >> id1 >> id2 >> c;
                 
-                gmModel.add_edge(id1, id2, c);
+                gmModel->add_edge(id1, id2, c);
             }
 
             GmModelIdx idx(g1_id, g2_id);
             model->save_gm_model(gmModel, idx);
-            model->model_keys.push_back(idx);
         }
     }
     model->no_graphs = max_graph_id + 1;
@@ -157,7 +171,8 @@ std::shared_ptr<MgmModelBase> parse_dd_file_fscan(fs::path dd_file) {
         model.graphs[g1_id] = g1;
         model.graphs[g2_id] = g2;
 
-        GmModel gmModel(g1, g2, no_a, no_e);
+        std::shared_ptr<GmModelBase> gmModel;
+        gmModel = std::make_shared<GmModel>(g1, g2, no_a, no_e);
 
         int ass_id = 0;
         int id1 = 0;
@@ -169,7 +184,7 @@ std::shared_ptr<MgmModelBase> parse_dd_file_fscan(fs::path dd_file) {
             ret = std::fscanf(infile, "%10s %d %d %d %lf\n", line_indicator, &ass_id, &id1, &id2, &c);
             assert(ret == 5);
             assert(strncmp(line_indicator, "a", 1) == 0);
-            gmModel.add_assignment(ass_id, id1, id2, c);
+            gmModel->add_assignment(ass_id, id1, id2, c);
         }
 
         // Edges
@@ -177,7 +192,7 @@ std::shared_ptr<MgmModelBase> parse_dd_file_fscan(fs::path dd_file) {
             ret = std::fscanf(infile, "%10s %d %d %lf\n", line_indicator, &id1, &id2, &c);
             assert(ret == 4);
             assert(strncmp(line_indicator, "e", 1) == 0);
-            gmModel.add_edge(id1, id2, c);
+            gmModel->add_edge(id1, id2, c);
         }
 
         GmModelIdx idx(g1_id, g2_id);
@@ -219,7 +234,7 @@ void safe_to_disk(const MgmSolution& solution, fs::path outPath, std::string fil
     for (auto const& [key, s] : solution.gmSolutions) {
         json json_labeling = null_valued_labeling(s.labeling);
 
-        std::shared_ptr<GmModel> gmModel = solution.model->get_gm_model(key);
+        std::shared_ptr<GmModelBase> gmModel = solution.model->get_gm_model(key);
         std::string key_string = fmt::format("{}, {}", gmModel->graph1.id, gmModel->graph2.id);
         j["labeling"][key_string] = json_labeling; 
     }

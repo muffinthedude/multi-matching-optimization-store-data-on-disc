@@ -18,18 +18,18 @@ class GmSolution {
         std::vector<int> labeling;
 
         // For use with models saved in memory 
-        GmSolution(std::shared_ptr<GmModel> model);
+        GmSolution(std::shared_ptr<GmModelBase> model);
         double evaluate() const;
-        std::shared_ptr<GmModel> model;
+        std::shared_ptr<GmModelBase> model;
 
         // For use with models saved on disc
-        GmSolution(std::shared_ptr<GmModel> model, GmModelIdx gmModelIdx);
+        GmSolution(std::shared_ptr<GmModelBase> model, GmModelIdx gmModelIdx);
         double evaluate(const std::shared_ptr<MgmModelBase> mgmModel) const;
         GmModelIdx gmModelIdx;
 
     private:
         bool is_active(AssignmentIdx assignment) const;
-        double evaluate_gm_model(std::shared_ptr<GmModel> gmModel) const;
+        double evaluate_gm_model(std::shared_ptr<GmModelBase> gmModel) const;
 };
 
 class MgmSolution {
