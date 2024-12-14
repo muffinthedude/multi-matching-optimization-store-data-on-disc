@@ -15,3 +15,6 @@
 [submodule "subprojects/rocksdb"]
 	path = subprojects/rocksdb
 	url = https://github.com/muffinthedude/rocksdb.git
+[submodule "subprojects/stxxl"]
+	path = subprojects/stxxl
+	url = git@github.com:stxxl/stxxl.git
