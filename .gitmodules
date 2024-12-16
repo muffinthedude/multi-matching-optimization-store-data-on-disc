@@ -1,7 +1,6 @@
 [submodule "unordered_dense"]
 	path = subprojects/unordered_dense
 	url = https://github.com/muffinthedude/unordered_dense.git
-	branch = meson_subproject
 [submodule "libqpbo"]
 	path = subprojects/libqpbo
 	url = https://github.com/sebastianstricker/libqpbo
@@ -15,3 +14,6 @@
 [submodule "subprojects/rocksdb"]
 	path = subprojects/rocksdb
 	url = https://github.com/muffinthedude/rocksdb.git
+[submodule "subprojects/stxxl"]
+	path = subprojects/stxxl
+	url = https://github.com/stxxl/stxxl.git
