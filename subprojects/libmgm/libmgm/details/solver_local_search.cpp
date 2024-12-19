@@ -88,11 +88,8 @@ namespace mgm
 
             // check if improved
             spdlog::info("Constructing new solution...");
-            spdlog::info("Initializing new solution...");
             auto mgm_sol = MgmSolution(model);
-            spdlog::info("Building new solution from cliques...");
             mgm_sol.build_from(new_manager.cliques, this->state.cliques);
-            spdlog::info("Computing new energy...");
             double energy = mgm_sol.evaluate_starting_from_old_energy(this->current_energy, graph_id);
 
             if (energy < this->current_energy) { 
