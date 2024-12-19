@@ -23,14 +23,25 @@ constexpr double INFINITY_COST = 1e99;
 GmSolution::GmSolution(std::shared_ptr<GmModelBase> model) {
     this->model = model;
     this->labeling = std::vector<int>(model->graph1.no_nodes, -1);
+    this->old_labeling = std::vector<int>(model->graph1.no_nodes, -1);
 }
 
 GmSolution::GmSolution(std::shared_ptr<GmModelBase> model, GmModelIdx gmModelIdx): gmModelIdx(gmModelIdx) {
     this->labeling = std::vector<int>(model->graph1.no_nodes, -1);
+    this->old_labeling = std::vector<int>(model->graph1.no_nodes, -1);
+}
+
+GmSolution::GmSolution(std::shared_ptr<MgmModelBase> model, GmModelIdx gmModelIdx): gmModelIdx(gmModelIdx) {
+    this->labeling = std::vector<int>(model->graph1_no_nodes[gmModelIdx], -1);
+    this->old_labeling = std::vector<int>(model->graph1_no_nodes[gmModelIdx], -1);
 }
 
 bool GmSolution::is_active(AssignmentIdx assignment) const {
     return this->labeling[assignment.first] == assignment.second;
+}
+
+bool GmSolution::was_active(AssignmentIdx assignment) const {
+    return this->old_labeling[assignment.first] == assignment.second;
 }
 
 double GmSolution::evaluate_gm_model(std::shared_ptr<GmModelBase> gmModel) const {
@@ -62,6 +73,50 @@ double GmSolution::evaluate_gm_model(std::shared_ptr<GmModelBase> gmModel) const
     return result;
 }
 
+double GmSolution::evaluate_gm_model_and_subtract_old_labelling(std::shared_ptr<GmModelBase> gmModel) const {
+    double result = 0.0;
+
+    // assignments
+    int node = 0;
+    for (const auto& label : this->labeling) {
+        if (label >= 0) {
+            if (gmModel->get_costs()->contains(node, label)) {
+                result += gmModel->get_costs()->unary(node, label);
+            }
+            else {
+                return INFINITY_COST;
+            }
+        }
+        node++;
+    }
+    node = 0;
+    for (const auto& label : this->old_labeling) {
+        if (label >= 0) {
+            if (gmModel->get_costs()->contains(node, label)) {
+                result -= gmModel->get_costs()->unary(node, label);
+            }
+            else {
+                return INFINITY_COST;
+            }
+        }
+        node++;
+    }
+
+    //edges
+    for (const auto& [edge_idx, cost] : gmModel->get_costs()->all_edges()) {
+        auto& a1 = edge_idx.first;
+        auto& a2 = edge_idx.second;
+        if (this->is_active(a1) && this->is_active(a2)) {
+            result += cost;
+        }
+        if (this->was_active(a1) && this->was_active(a2)) {
+            result -= cost;
+        }
+    }
+
+    return result;
+}
+
 double GmSolution::evaluate() const {
     return this->evaluate_gm_model(this->model);
 }
@@ -72,14 +127,17 @@ double GmSolution::evaluate(const std::shared_ptr<MgmModelBase> mgmModel) const 
     return this->evaluate_gm_model(gmModel);
 }
 
+double GmSolution::evaluate_and_subtract_old_labelling(const std::shared_ptr<MgmModelBase> mgmModel) const {
+    std::shared_ptr<GmModelBase> gmModel = mgmModel->get_gm_model(this->gmModelIdx); 
+    return this->evaluate_gm_model_and_subtract_old_labelling(gmModel);
+}
 
 MgmSolution::MgmSolution(std::shared_ptr<MgmModelBase> model) {
     this->model = model;
     gmSolutions.reserve(model->model_keys.size());
 
     for (auto const& key: model->model_keys) {
-        std::shared_ptr<GmModelBase> gmModel = model->get_gm_model(key);
-        gmSolutions[key] = GmSolution(gmModel, key);
+        gmSolutions[key] = GmSolution(model, key);
     }
 }
 
@@ -95,6 +153,38 @@ void MgmSolution::build_from(const CliqueTable& cliques)
                 }
                 else {
                     this->gmSolutions[GmModelIdx(g2,g1)].labeling[n2] = n1;
+                }
+            }
+        }
+    }
+}
+
+void MgmSolution::build_from(const CliqueTable& cliques, const CliqueTable old_cliques) 
+{
+    for (const auto& c : cliques) {
+        for (const auto& [g1, n1] : c) {
+            for (const auto& [g2, n2] : c) {
+                if (g1 == g2) 
+                    continue;
+                if (g1 < g2) {
+                    this->gmSolutions[GmModelIdx(g1,g2)].labeling[n1] = n2;
+                }
+                else {
+                    this->gmSolutions[GmModelIdx(g2,g1)].labeling[n2] = n1;
+                }
+            }
+        }
+    }
+    for (const auto& c : old_cliques) {
+        for (const auto& [g1, n1] : c) {
+            for (const auto& [g2, n2] : c) {
+                if (g1 == g2) 
+                    continue;
+                if (g1 < g2) {
+                    this->gmSolutions[GmModelIdx(g1,g2)].old_labeling[n1] = n2;
+                }
+                else {
+                    this->gmSolutions[GmModelIdx(g2,g1)].old_labeling[n2] = n1;
                 }
             }
         }
@@ -189,6 +279,17 @@ double MgmSolution::evaluate() const {
         result += m.second.evaluate(this->model);
     }
     return result;
+}
+
+double MgmSolution::evaluate_starting_from_old_energy(double old_energy, const int& graph_id) const {
+    for (int idx = 0; idx < this->model->no_graphs; ++idx) {
+        if (graph_id < idx) {
+            old_energy += this->gmSolutions.at(GmModelIdx(graph_id, idx)).evaluate_and_subtract_old_labelling(this->model);
+        } else if (graph_id > idx) {
+            old_energy += this->gmSolutions.at(GmModelIdx(idx, graph_id)).evaluate_and_subtract_old_labelling(this->model);
+        }
+    }
+    return old_energy;
 }
 
 bool MgmSolution::is_cycle_consistent() const{

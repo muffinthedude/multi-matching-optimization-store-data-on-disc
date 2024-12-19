@@ -113,6 +113,7 @@ MgmModel::MgmModel(){
 void MgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
     this->models[idx] = gm_model;
     this->model_keys.push_back(idx);
+    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 
 std::shared_ptr<GmModelBase> MgmModel::get_gm_model(const GmModelIdx& idx) {
@@ -122,6 +123,7 @@ std::shared_ptr<GmModelBase> MgmModel::get_gm_model(const GmModelIdx& idx) {
 void SqlMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
     this->save_model_to_db(gm_model, idx);
     this->model_keys.push_back(idx);
+    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 std::shared_ptr<GmModelBase> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
     auto it = this->models.find(idx);
@@ -311,6 +313,7 @@ void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const
         return;
     }
     this->model_keys.push_back(idx);
+    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 
 std::shared_ptr<GmModelBase> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
@@ -370,6 +373,7 @@ void StxxlMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const G
     external_gm_model ex_gm_model(gm_model);
     this->models.insert(std::make_pair(idx, ex_gm_model));
     this->model_keys.push_back(idx);
+    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 std::shared_ptr<GmModelBase> StxxlMgmModel::get_gm_model(const GmModelIdx& idx) {
     return this->models[idx].get();

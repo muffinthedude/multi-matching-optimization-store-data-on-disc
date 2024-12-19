@@ -136,6 +136,7 @@ class MgmModelBase {
 
         int no_graphs;
         std::vector<Graph> graphs;
+        std::unordered_map<GmModelIdx, int, GmModelIdxHash> graph1_no_nodes; 
         
         std::vector<GmModelIdx> model_keys;  // maybe use other data structure here to make sure same key is not saved multiple times (set?)
     
@@ -183,7 +184,7 @@ class SqlMgmModel: public MgmModelBase {
         sqlite3_stmt* insert_stmt;
         sqlite3_stmt* read_stmt;
         std::queue<GmModelIdx> cache_queue;
-        const int number_of_cached_models = 5;
+        const int number_of_cached_models = 120;
 };
 
 class RocksdbMgmModel: public MgmModelBase {
