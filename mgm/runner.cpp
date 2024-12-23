@@ -1,5 +1,7 @@
 #include <stdexcept>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <libmgm/mgm.hpp>
 
 #include "argparser.hpp"
@@ -7,6 +9,14 @@
 #include "runner.hpp"
 
 Runner::Runner(ArgParser::Arguments args) : args(args) {
+    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("logs.txt", true);
+
+    // Create a multi-sink logger
+    auto multi_sink_logger = std::make_shared<spdlog::logger>(
+        "multi_sink", spdlog::sinks_init_list{console_sink, file_sink});
+    spdlog::set_default_logger(multi_sink_logger);
+    
     spdlog::info("Loading model...");
 
     auto mgmModel = mgm::io::parse_dd_file(args.input_file, args.save_mode);

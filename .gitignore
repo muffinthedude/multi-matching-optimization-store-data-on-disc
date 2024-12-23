@@ -7,6 +7,8 @@ subprojects/sqlite*/
 
 packagecache/
 modelsdb/
+logs.txt
+my_script.sh
 
 .vscode
 *.log
