@@ -30,6 +30,7 @@ class LocalSearcher {
         double current_energy = 0.0;
 
         void iterate();
+        void iteration_step(const int& graph_id, const int& idx);
         CliqueManager state;
         std::vector<int> search_order;
         std::shared_ptr<MgmModelBase> model;

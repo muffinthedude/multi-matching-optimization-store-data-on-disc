@@ -27,7 +27,7 @@ const std::regex re_p("^p ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$");
 const std::regex re_a("^a ([0-9]+) ([0-9]+) ([0-9]+) (.+)$");
 const std::regex re_e("^e ([0-9]+) ([0-9]+) (.+)$");
 
-std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode save_mode) {
+std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode save_mode, load_and_process_in_parallel parallel_mode) {
     std::shared_ptr<MgmModelBase> model;
     switch (save_mode) {
         case disc_save_mode::no:
@@ -44,6 +44,12 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             break;
         default:
             model = std::make_shared<MgmModel>();
+            break;
+    }
+
+    switch (parallel_mode) {
+        case load_and_process_in_parallel::on:
+            model->paralel_loading_mode = true;
             break;
     }
 
@@ -120,6 +126,8 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
         }
     }
     model->no_graphs = max_graph_id + 1;
+
+    model->number_of_cached_models = max_graph_id + 1;
 
     spdlog::info("Finished parsing model.\n");
     return model;

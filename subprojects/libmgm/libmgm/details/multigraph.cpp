@@ -126,19 +126,27 @@ void SqlMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmM
     this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 std::shared_ptr<GmModelBase> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
-    auto it = this->models.find(idx);
-    if (it != this->models.end()) {
-        return it->second;
+    if (this->bulk_load_mode or this->paralel_loading_mode) {
+        auto process_it = this->process_cache->find(idx);
+        if (process_it != this->process_cache->end()) {
+            return process_it->second;
+        }
+    } else {
+        auto it = this->cache.find(idx);
+        if (it != this->cache.end()) {
+            return it->second;
+        }
     }
     std::shared_ptr<GmModelBase> gmModel = this->read_model_from_db(idx);
-    if (this->cache_queue.size() == this->number_of_cached_models) {
-        GmModelIdx idxOfModelToBeErased = this->cache_queue.front();
-        this->models.erase(idxOfModelToBeErased);
-        this->cache_queue.pop();
+    if (not this->paralel_loading_mode) {
+        if (this->cache_queue.size() == this->number_of_cached_models) {
+            GmModelIdx idxOfModelToBeErased = this->cache_queue.front();
+            this->cache.erase(idxOfModelToBeErased);
+            this->cache_queue.pop();
+        }
+        this->cache[idx] = gmModel;
+        this->cache_queue.push(idx);
     }
-    this->models[idx] = gmModel;
-    this->cache_queue.push(idx);
-
     return gmModel;
 }
 
@@ -248,6 +256,70 @@ std::shared_ptr<GmModelBase> SqlMgmModel::read_model_from_db(const GmModelIdx& i
     return gmModelPtr;
 }
 
+void SqlMgmModel::bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {
+    // build statement
+    std::string sql_query = "SELECT * FROM models WHERE";
+    for (size_t i = 0; i < keys.size(); ++i) {
+        sql_query += " (g1_id = ? AND g2_id = ?)";
+        if (i < keys.size() - 1) {
+            sql_query += " OR ";
+        }
+    }
+    sqlite3_stmt* sql_stmt;
+
+    // Prepare the SQL statement
+    if (sqlite3_prepare_v2(this->db, sql_query.c_str(), -1, &sql_stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
+        return;
+    }
+
+    // bind indexes to statement
+    int binding_index = 1;
+    for (const GmModelIdx& model_idx: keys) {
+        if (sqlite3_bind_int(sql_stmt, binding_index, model_idx.first)    != SQLITE_OK ||
+            sqlite3_bind_int(sql_stmt, binding_index+1, model_idx.second) != SQLITE_OK
+        ) {
+            std::cerr << "Failed to bind values: " << sqlite3_errmsg(db) << std::endl;
+            sqlite3_finalize(sql_stmt);
+            exit(1);
+        }
+        binding_index += 2;
+    }
+    
+    std::string read_serialized_model;
+    while (sqlite3_step(sql_stmt) == SQLITE_ROW) {
+        int g1_id = sqlite3_column_int(sql_stmt, 0);
+        int g2_id = sqlite3_column_int(sql_stmt, 1);
+        const void* blob_data = sqlite3_column_blob(sql_stmt, 2);  // Get the BLOB data
+        int blob_size = sqlite3_column_bytes(sql_stmt, 2);
+        read_serialized_model = std::string(reinterpret_cast<const char*>(blob_data), blob_size);
+        (*this->load_cache)[GmModelIdx(g1_id, g2_id)] = deserialize_serialized_model(read_serialized_model);
+    }
+    sqlite3_finalize(sql_stmt);
+}
+
+void SqlMgmModel::bulk_read_to_load_cache(const int& model_id) {
+    std::string sql_query = "SELECT * FROM models WHERE g1_id  = " + std::to_string(model_id) + " OR g2_id = " + std::to_string(model_id);
+    sqlite3_stmt* sql_stmt;
+
+    // Prepare the SQL statement
+    if (sqlite3_prepare_v2(this->db, sql_query.c_str(), -1, &sql_stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
+        return;
+    }
+
+    std::string read_serialized_model;
+    while (sqlite3_step(sql_stmt) == SQLITE_ROW) {
+        int g1_id = sqlite3_column_int(sql_stmt, 0);
+        int g2_id = sqlite3_column_int(sql_stmt, 1);
+        const void* blob_data = sqlite3_column_blob(sql_stmt, 2);  // Get the BLOB data
+        int blob_size = sqlite3_column_bytes(sql_stmt, 2);
+        read_serialized_model = std::string(reinterpret_cast<const char*>(blob_data), blob_size);
+        (*this->load_cache)[GmModelIdx(g1_id, g2_id)] = deserialize_serialized_model(read_serialized_model);
+    }
+    sqlite3_finalize(sql_stmt);
+}
+
 void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase> gmModel) {
     std::ostringstream output_stream;
         {
@@ -274,6 +346,10 @@ SqlMgmModel::SqlMgmModel() {
     this->create_table();
     this->set_up_write_statement();
     this->set_up_read_statement();
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> load;
+    this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(load);
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> process;
+    this->process_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(process);
 }
 SqlMgmModel::~SqlMgmModel() {
     sqlite3_finalize(this->read_stmt);
@@ -301,6 +377,10 @@ RocksdbMgmModel::RocksdbMgmModel() {
     this->open_db();
     this->write_options = rocksdb::WriteOptions();
     this->read_options = rocksdb::ReadOptions();
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> load;
+    this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(load);
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> process;
+    this->process_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(process);
 }
 
 void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
@@ -317,13 +397,80 @@ void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const
 }
 
 std::shared_ptr<GmModelBase> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
+    if (this->bulk_load_mode or this->paralel_loading_mode) {
+        auto it = this->process_cache->find(idx);
+        if (it != this->process_cache->end()) {
+            return it->second;
+        }
+    } else {
+       auto it = this->cache.find(idx);
+        if (it != this->cache.end()) {
+            return it->second;
+        } 
+    }
+    
     std::string retrieved_serialized_model;
     rocksdb::Status status = db->Get(this->read_options, this->convert_idx_into_string(idx), &retrieved_serialized_model);
     if (!status.ok()) {
         std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
     }
     std::shared_ptr<GmModelBase> gmModel = deserialize_serialized_model(retrieved_serialized_model);
+    if (not this->paralel_loading_mode) {
+        if (this->cache_queue.size() == this->number_of_cached_models) {
+            GmModelIdx idxOfModelToBeErased = this->cache_queue.front();
+            this->cache.erase(idxOfModelToBeErased);
+            this->cache_queue.pop();
+        }
+        this->cache[idx] = gmModel;
+        this->cache_queue.push(idx);
+    }
+    
     return gmModel;
+}
+
+void RocksdbMgmModel::bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {
+    // convert keys to string
+    std::vector<rocksdb::Slice> slice_keys(keys.size());
+    std::vector<std::string> string_storage(keys.size());
+    for (size_t i = 0; i < keys.size(); ++i) {
+        string_storage[i] = this->convert_idx_into_string(keys[i]);
+        slice_keys[i] = rocksdb::Slice(string_storage[i]);
+    }
+    std::vector<std::string> values(keys.size());
+    this->db->MultiGet(this->read_options, slice_keys, &values);
+    for (size_t i = 0; i < keys.size(); ++i) {
+        (*this->load_cache)[keys[i]] = deserialize_serialized_model(values[i]);
+    }
+}
+
+void RocksdbMgmModel::bulk_read_to_load_cache(const int& model_id) {
+    std::vector<rocksdb::Slice> slice_keys(this->no_graphs - 1);
+    std::vector<std::string> string_storage(this->no_graphs - 1);
+    int slice_idx = 0;
+    for (int other_model_id = 0; other_model_id < this->no_graphs; ++other_model_id) {
+        if (model_id == other_model_id) {
+            continue;
+        }
+        string_storage[slice_idx] = (model_id < other_model_id) ? std::to_string(model_id) + "," + std::to_string(other_model_id): 
+                                                                  std::to_string(other_model_id) + "," + std::to_string(model_id);
+        slice_keys[slice_idx] = rocksdb::Slice(string_storage[slice_idx]);
+        ++slice_idx;
+    }
+    std::vector<std::string> values(this->no_graphs - 1);
+    this->db->MultiGet(this->read_options, slice_keys, &values);
+    int serialized_model_index = 0;
+    for (int other_model_id = 0; other_model_id < this->no_graphs; ++other_model_id) {
+        if (model_id == other_model_id) {
+            continue;
+        }
+        (*this->load_cache)[(model_id < other_model_id) ? GmModelIdx(model_id, other_model_id): GmModelIdx(other_model_id, model_id)] = deserialize_serialized_model(values[serialized_model_index]);
+        ++serialized_model_index;
+    }
+};
+
+void RocksdbMgmModel::swap_caches() {
+    std::swap(this->load_cache, this->process_cache);
+    this->load_cache->clear();
 }
 
 void RocksdbMgmModel::open_db() {

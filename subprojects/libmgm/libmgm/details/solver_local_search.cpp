@@ -38,6 +38,11 @@ namespace mgm
         assert(this->search_order.size() > 0); // Search order was not set
         spdlog::info("Running local search.");
 
+        if (this->model->paralel_loading_mode) {  // preload first model
+            this->model->bulk_read_to_load_cache(*this->search_order.begin());
+            this->model->swap_caches();
+        }
+
         while (!this->should_stop()) {
             this->current_step++;
             this->previous_energy = this->current_energy;
@@ -73,13 +78,36 @@ namespace mgm
     void LocalSearcher::iterate() {
         int idx = 1;
 
-        for (const auto& graph_id : this->search_order) {
-            if (this->current_step > 1  && graph_id == last_improved_graph) {
+        for (auto graph_id_it = this->search_order.begin(); graph_id_it != this->search_order.end(); ++graph_id_it) {
+            if (this->current_step > 1  && *graph_id_it == last_improved_graph) {
                 spdlog::info("No improvement since this graph was last checked. Stopping iteration early.");
                 return;
             }
 
-            spdlog::info("Resolving for graph {} (step {}/{})", graph_id, idx, this->search_order.size());
+            if (this->model->paralel_loading_mode) {
+                int graph_id = (std::next(graph_id_it) != this->search_order.end()) ? *std::next(graph_id_it): *this->search_order.begin();
+                std::thread t1([this, graph_id]() {
+                        this->model->bulk_read_to_load_cache(graph_id);
+                    }
+                );
+                std::thread t2([this, graph_id_it, idx]() {
+                        this->iteration_step(*graph_id_it, idx);
+                    }
+                );
+                t1.join();
+                t2.join();
+                this->model->swap_caches();
+            } else {
+                this->iteration_step(*graph_id_it, idx);
+            }
+            
+
+            idx++;
+        }
+    }
+
+    void LocalSearcher::iteration_step(const int& graph_id, const int& idx) {
+        spdlog::info("Resolving for graph {} (step {}/{})", graph_id, idx, this->search_order.size());
 
             auto managers = details::split(this->state, graph_id, this->model);
 
@@ -101,9 +129,6 @@ namespace mgm
             else {
                 spdlog::info("Worse solution(Energy: {}) after rematch. Reversing.\n", energy);
             }
-
-            idx++;
-        }
     }
 
     bool LocalSearcher::should_stop() {

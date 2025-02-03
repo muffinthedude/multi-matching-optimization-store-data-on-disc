@@ -123,6 +123,16 @@ void SequentialGenerator::generate() {
     this->current_state = std::move(this->generation_queue.front());
     this->generation_queue.pop();
 
+    if (this->model->paralel_loading_mode) {
+        int first_model_id = this->current_state.graph_ids[0];
+        int second_model_id = this->generation_queue.front().graph_ids[0];
+        GmModelIdx first_gm_to_load = (first_model_id < second_model_id) ? GmModelIdx(first_model_id, second_model_id): GmModelIdx(second_model_id, first_model_id);
+        this->model->bulk_read_to_load_cache(
+            std::vector<GmModelIdx> {first_gm_to_load}
+        );
+        this->model->swap_caches();
+    }
+
     int step = 1;
     int no_steps = this->generation_queue.size();
 
@@ -163,13 +173,30 @@ std::vector<int> SequentialGenerator::init_generation_sequence(matching_order or
 void SequentialGenerator::step() {
     assert(!this->generation_queue.empty());
     CliqueManager& current  = this->current_state;
-    CliqueManager& next     = this->generation_queue.front();
+    CliqueManager next     = this->generation_queue.front();
+    
+    CliqueManager new_manager;
+    if (this->model->paralel_loading_mode) {
+        this->generation_queue.pop();
+        if (this->generation_queue.empty()) {
+            details::match_and_merge(current, next, new_manager, this->model);
+        } else {
+            CliqueManager& next_pre_load = this->generation_queue.front();
+            std::thread t1(details::preload, std::cref(current), std::cref(next), std::cref(next_pre_load.graph_ids[0]), this->model); // bulk_load_here TODO: change given values, handle graph ids instead of just one id maybe
+            std::thread t2(details::match_and_merge, std::cref(current), std::cref(next), std::ref(new_manager), this->model); // compute her
 
-    GmSolution solution         = details::match(current, next, this->model);
-    CliqueManager new_manager   = details::merge(current, next, solution, this->model);
-
-    this->current_state = new_manager;
-    this->generation_queue.pop();
+            t1.join();
+            t2.join();
+            this->model->swap_caches();  // swap process and loader here
+        }
+        this->current_state = new_manager;
+    } else {
+        GmSolution solution         = details::match(current, next, this->model);
+        new_manager   = details::merge(current, next, solution, this->model);
+        this->current_state = new_manager;
+        this->generation_queue.pop();
+    }
+    
 }
 
 ParallelGenerator::ParallelGenerator(std::shared_ptr<MgmModelBase> model) 
@@ -261,7 +288,7 @@ CliqueManager ParallelGenerator::parallel_task(std::vector<CliqueManager> sub_ge
 
 namespace details {
     
-GmSolution match(const CliqueManager& manager_1, const CliqueManager& manager_2, const std::shared_ptr<MgmModelBase> model){
+GmSolution  match(const CliqueManager& manager_1, const CliqueManager& manager_2, const std::shared_ptr<MgmModelBase> model){
 
     spdlog::info("Matching {} <-- {}", manager_1.graph_ids, manager_2.graph_ids);
     CliqueMatcher matcher(manager_1, manager_2, model);
@@ -320,6 +347,23 @@ CliqueManager merge(const CliqueManager& manager_1, const CliqueManager& manager
     
     new_manager.build_clique_idx_view();
     return new_manager;
+}
+
+void match_and_merge(const CliqueManager& manager_1, const CliqueManager& manager_2, CliqueManager& result_manager, const std::shared_ptr<MgmModelBase> model) {
+    GmSolution solution = match(manager_1, manager_2, model);
+    result_manager = merge(manager_1, manager_2, solution, model);
+}
+
+void preload(const CliqueManager& manager_1, const CliqueManager& manager_2, const int& preload_graph_id, std::shared_ptr<MgmModelBase> model) {
+    std::vector<int> preload_graph_ids = manager_1.graph_ids;
+    for (const int& graph_id: manager_2.graph_ids) {
+        preload_graph_ids.push_back(graph_id);
+    }  // don't do this, instead exchange when swapping
+    std::vector<mgm::GmModelIdx> preload_model_ids(preload_graph_ids.size());
+    for (int i = 0; i < preload_model_ids.size(); ++i) {
+        preload_model_ids[i] = (preload_graph_ids[i] < preload_graph_id) ? GmModelIdx(preload_graph_ids[i], preload_graph_id): GmModelIdx(preload_graph_id, preload_graph_ids[i]);
+    }
+    model->bulk_read_to_load_cache(preload_model_ids);
 }
 
 std::pair<CliqueManager, CliqueManager> split(const CliqueManager &manager, int graph_id, const std::shared_ptr<MgmModelBase> model) {
@@ -387,6 +431,16 @@ void CliqueMatcher::collect_assignments() {
     // In Python, this is the new implementation, but I have doubts, if this is in fact faster.
 
     // For all graph pairs
+    if (this->model->bulk_load_mode) {
+        std::vector<GmModelIdx> graph_pair_idxes;
+        graph_pair_idxes.reserve(this->manager_1.graph_ids.size() * this->manager_2.graph_ids.size());
+        for (const auto& g1 : this->manager_1.graph_ids) {
+            for (const auto& g2 : this->manager_2.graph_ids) {
+                graph_pair_idxes.emplace_back((g1 < g2) ? GmModelIdx(g1, g2) : GmModelIdx(g2, g1));
+            }
+        }
+        this->model->bulk_read_to_load_cache(graph_pair_idxes);
+    }
     for (const auto& g1 : this->manager_1.graph_ids) {
         for (const auto& g2 : this->manager_2.graph_ids) {
             bool is_sorted = (g1 < g2);

@@ -89,6 +89,8 @@ namespace details {
 // Needed for MgmSolver and Local searcher (-> Parent class maybe?)
 GmSolution match(const CliqueManager& manager_1, const CliqueManager& manager_2, const std::shared_ptr<MgmModelBase> model);
 CliqueManager merge(const CliqueManager& manager_1, const CliqueManager& manager_2, const GmSolution& solution, const std::shared_ptr<MgmModelBase> model);
+void match_and_merge(const CliqueManager& manager_1, const CliqueManager& manager_2, CliqueManager& result_manager, const std::shared_ptr<MgmModelBase> model);
+void preload(const CliqueManager& manager_1, const CliqueManager& manager_2, const int& preload_graph_id, std::shared_ptr<MgmModelBase> model);
 std::pair<CliqueManager, CliqueManager> split(const CliqueManager& manager, int graph_id, const std::shared_ptr<MgmModelBase> model); // Splits off graph [graph_id] from manager
         
 
