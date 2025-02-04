@@ -47,9 +47,7 @@ openmp = dependency('openmp')
 cmake = import('cmake')
 rocksdb = cmake.subproject('rocksdb')
 rocksdb_dep = rocksdb.dependency('rocksdb')
-stxxl = cmake.subproject('stxxl')
-stxxl_dep = stxxl.dependency('stxxl')
 
 executable('mgm',
   sources,
-  dependencies : [libmgm_dep, libqpbo_dep, libmpopt_dep, spdlog_dep, json_dep, cli11_dep, unordered_dense_dep, lsap_dep, cereal_dep, sqlite3_dep, rocksdb_dep, openmp, stxxl_dep])
+  dependencies : [libmgm_dep, libqpbo_dep, libmpopt_dep, spdlog_dep, json_dep, cli11_dep, unordered_dense_dep, lsap_dep, cereal_dep, sqlite3_dep, rocksdb_dep, openmp])

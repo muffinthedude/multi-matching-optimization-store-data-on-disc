@@ -65,47 +65,6 @@ void GmModel::serialize_to_binary(std::string& result_string) const {
     result_string = output_stream.str();
 }
 
-StxxlGmModel::StxxlGmModel(Graph g1, Graph g2, int no_assignments, int no_edges)
-: 
-    GmModelBase(g1, g2, no_assignments, no_edges) {
-        costmap_ptr costs_ptr(std::make_shared<CostMap>(no_assignments, no_edges));
-        external_costs ex_costs(costs_ptr);
-        this->costs = ex_costs;
-        this->assignment_list.reserve(no_assignments);
-
-        //FIXME: Number of elements for assignments_left and assignments_right is unclear.
-        // Loading assignments without reserving space leads to (avoidable?) reallocations. 
-        this->assignments_left  = std::vector<std::vector<int>>(g1.no_nodes);
-        this->assignments_right = std::vector<std::vector<int>>(g2.no_nodes);
-    }
-
-void StxxlGmModel::add_assignment([[maybe_unused]] int assignment_id, int node1, int node2, double cost) {
-    assert ((size_t) assignment_id == this->assignment_list.size());
-
-    (void) this->assignment_list.emplace_back(node1, node2);
-
-    this->costs.get()->set_unary(node1, node2, cost);
-    this->assignments_left[node1].push_back(node2);
-    this->assignments_right[node2].push_back(node1);
-}
-
-void StxxlGmModel::add_edge(int assignment1, int assignment2, double cost) {
-    auto& a1 = this->assignment_list[assignment1];
-    auto& a2 = this->assignment_list[assignment2];
-
-    this->add_edge(a1.first, a1.second, a2.first, a2.second, cost);
-}
-
-void StxxlGmModel::add_edge(int assignment1_node1, int assignment1_node2, int assignment2_node1, int assignment2_node2, double cost) {
-    this->costs.get()->set_pairwise(assignment1_node1, assignment1_node2, assignment2_node1, assignment2_node2, cost);
-    //this->costs->set_pairwise(a2.first, a2.second, a1.first, a1.second, cost); //FIXME: RAM overhead. Avoids sorting later though.
-}
-
-std::shared_ptr<CostMap> StxxlGmModel::get_costs() {
-    return this->costs.get();
-}
-
-
 MgmModel::MgmModel(){ 
     //models.reserve(300);
 }
@@ -493,37 +452,6 @@ RocksdbMgmModel::~RocksdbMgmModel() {
     if (!status.ok()) {
         std::cerr << "Error deleting database: " << status.ToString() << std::endl;
     }
-}
-
-// stxxl
-
-external_gm_model& stxxl_unordered_map::at(const GmModelIdx idx)
-{
-    auto result = this->find(idx);
-    if (result == this->end()) {
-        throw std::out_of_range("Element not found in container");
-    }
-
-    return (*result).second;
-}
-const external_gm_model& stxxl_unordered_map::at(const GmModelIdx idx) const
-{
-    auto result = this->find(idx);
-    if (result == this->end()) {
-        throw std::out_of_range("Element not found in container");
-    }
-
-    return (*result).second;
-}
-
-void StxxlMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
-    external_gm_model ex_gm_model(gm_model);
-    this->models.insert(std::make_pair(idx, ex_gm_model));
-    this->model_keys.push_back(idx);
-    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
-}
-std::shared_ptr<GmModelBase> StxxlMgmModel::get_gm_model(const GmModelIdx& idx) {
-    return this->models[idx].get();
 }
 
 }

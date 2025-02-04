@@ -10,8 +10,6 @@
 #include <sqlite3.h>
 #include <rocksdb/db.h>
 #include <cereal/types/memory.hpp>
-#include <stxxl.h> 
-#include <stxxl/bits/common/external_shared_ptr.h>
 #include <cereal/types/polymorphic.hpp>
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/base_class.hpp>
@@ -106,27 +104,6 @@ class GmModel: public GmModelBase{
 
 void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase> gmModel);
 std::shared_ptr<GmModelBase> deserialize_serialized_model(std::string& serialized_model);
-
-typedef std::shared_ptr<CostMap> costmap_ptr;
-typedef stxxl::external_shared_ptr<costmap_ptr> external_costs;
-
-class StxxlGmModel: public GmModelBase{
-    public:
-        StxxlGmModel() {};
-        StxxlGmModel(Graph g1, Graph g2, int no_assignments, int no_edges);
-
-        void add_assignment(int assignment_id, int node1, int node2, double cost);
-
-        // both valid alternatives.
-        void add_edge(int assignment1, int assigment2, double cost);
-        void add_edge(int assignment1_node1, int assignment1_node2, int assignment2_node1, int assignment2_node2, double cost);
-
-        std::shared_ptr<CostMap> get_costs();
-
-        external_costs costs;
-
-};
-
 
 class MgmModelBase {
     public: 
@@ -231,48 +208,6 @@ class RocksdbMgmModel: public MgmModelBase {
 
         std::queue<GmModelIdx> cache_queue;
         
-};
-
-// stxxl 
-
-struct CompareLess
-{
- bool operator () (const GmModelIdx & a, const GmModelIdx & b) const
- { 
-    return (a.first != b.first and a.first < b.first) or (a.first == b.first and a.second < b.second);
-}
- static GmModelIdx min_value() { return GmModelIdx(std::numeric_limits<int>::min(), std::numeric_limits<int>::min()); }
- static GmModelIdx max_value() { return GmModelIdx(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()); }
-};
-
-typedef std::shared_ptr<GmModelBase> gm_model_base_ptr;
-typedef stxxl::external_shared_ptr<gm_model_base_ptr> external_gm_model;
-
-#define SUB_BLOCK_SIZE 8192
-#define SUB_BLOCKS_PER_BLOCK 256
- // template parameter <KeyType, MappedType, HashType, CompareType, SubBlockSize, SubBlocksPerBlock>
- typedef stxxl::unordered_map<
-GmModelIdx, external_gm_model, GmModelIdxHash, CompareLess, SUB_BLOCK_SIZE, SUB_BLOCKS_PER_BLOCK
- > unordered_map_type;
-
-class stxxl_unordered_map : public unordered_map_type                                             
-{
-public:
-    external_gm_model& at(const GmModelIdx);
-    const external_gm_model& at(const GmModelIdx) const;
-};
-
-class StxxlMgmModel: public MgmModelBase {
-    public:
-        StxxlMgmModel() {};
-        void save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx);
-        std::shared_ptr<GmModelBase> get_gm_model(const GmModelIdx& idx);
-        void bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {};
-        void bulk_read_to_load_cache(const int& model_id) {};
-        virtual void swap_caches() {};
-
-        stxxl_unordered_map models;
-
 };
 
 }

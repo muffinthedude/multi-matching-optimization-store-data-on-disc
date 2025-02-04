@@ -15,14 +15,16 @@ std::shared_ptr<MgmModelBase> build_sync_problem(std::shared_ptr<MgmModelBase> m
     switch (save_mode) {
         case io::disc_save_mode::no:
             sync_model = std::make_shared<MgmModel>();
+            break;
         case io::disc_save_mode::sql:
             sync_model = std::make_shared<SqlMgmModel>();
+            break;
         case io::disc_save_mode::rocksdb:
             sync_model = std::make_shared<RocksdbMgmModel>();
-        case io::disc_save_mode::stxxl:
-            sync_model = std::make_shared<StxxlMgmModel>();
+            break;
         default:
             sync_model = std::make_shared<MgmModel>();
+            break;
     }
 
     sync_model->no_graphs = model->no_graphs;
@@ -57,13 +59,7 @@ std::shared_ptr<MgmModelBase> build_sync_problem(std::shared_ptr<MgmModelBase> m
 namespace details {
 std::shared_ptr<GmModelBase>  create_feasible_sync_model(std::shared_ptr<GmModelBase> model, GmSolution& solution, io::disc_save_mode save_mode) {
 
-    std::shared_ptr<GmModelBase> sync_model;
-    switch (save_mode) {
-        case(io::disc_save_mode::stxxl):
-            sync_model = std::make_shared<StxxlGmModel>(model->graph1, model->graph2, model->no_assignments, 0);
-        default:
-            sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
-    }
+    std::shared_ptr<GmModelBase> sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
     
     // Copy assignments
     // TODO: This is unnecessarily inefficient. Cost datastructure might be too restricted.
@@ -86,13 +82,7 @@ std::shared_ptr<GmModelBase>  create_feasible_sync_model(std::shared_ptr<GmModel
 
 std::shared_ptr<GmModelBase>  create_infeasible_sync_model(std::shared_ptr<GmModelBase> model, GmSolution& solution, io::disc_save_mode save_mode) {
     int no_assignments = model->graph1.no_nodes * model->graph2.no_nodes;
-    std::shared_ptr<GmModelBase> sync_model;
-    switch (save_mode) {
-        case(io::disc_save_mode::stxxl):
-            sync_model = std::make_shared<StxxlGmModel>(model->graph1, model->graph2, model->no_assignments, 0);
-        default:
-            sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
-    }
+    std::shared_ptr<GmModelBase> sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
 
     // Initialize all costs to 0
     int idx = 0;
