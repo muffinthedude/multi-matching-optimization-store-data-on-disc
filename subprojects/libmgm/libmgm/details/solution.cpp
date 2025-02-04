@@ -20,13 +20,13 @@ namespace mgm {
 
 constexpr double INFINITY_COST = 1e99;
 
-GmSolution::GmSolution(std::shared_ptr<GmModelBase> model) {
+GmSolution::GmSolution(std::shared_ptr<GmModel> model) {
     this->model = model;
     this->labeling = std::vector<int>(model->graph1.no_nodes, -1);
     this->old_labeling = std::vector<int>(model->graph1.no_nodes, -1);
 }
 
-GmSolution::GmSolution(std::shared_ptr<GmModelBase> model, GmModelIdx gmModelIdx): gmModelIdx(gmModelIdx) {
+GmSolution::GmSolution(std::shared_ptr<GmModel> model, GmModelIdx gmModelIdx): gmModelIdx(gmModelIdx) {
     this->labeling = std::vector<int>(model->graph1.no_nodes, -1);
     this->old_labeling = std::vector<int>(model->graph1.no_nodes, -1);
 }
@@ -44,7 +44,7 @@ bool GmSolution::was_active(AssignmentIdx assignment) const {
     return this->old_labeling[assignment.first] == assignment.second;
 }
 
-double GmSolution::evaluate_gm_model(std::shared_ptr<GmModelBase> gmModel) const {
+double GmSolution::evaluate_gm_model(std::shared_ptr<GmModel> gmModel) const {
     double result = 0.0;
 
     // assignments
@@ -73,7 +73,7 @@ double GmSolution::evaluate_gm_model(std::shared_ptr<GmModelBase> gmModel) const
     return result;
 }
 
-double GmSolution::evaluate_gm_model_and_subtract_old_labelling(std::shared_ptr<GmModelBase> gmModel) const {
+double GmSolution::evaluate_gm_model_and_subtract_old_labelling(std::shared_ptr<GmModel> gmModel) const {
     double result = 0.0;
 
     // assignments
@@ -123,12 +123,12 @@ double GmSolution::evaluate() const {
 
 double GmSolution::evaluate(const std::shared_ptr<MgmModelBase> mgmModel) const {
     
-    std::shared_ptr<GmModelBase> gmModel = mgmModel->get_gm_model(this->gmModelIdx); 
+    std::shared_ptr<GmModel> gmModel = mgmModel->get_gm_model(this->gmModelIdx); 
     return this->evaluate_gm_model(gmModel);
 }
 
 double GmSolution::evaluate_and_subtract_old_labelling(const std::shared_ptr<MgmModelBase> mgmModel) const {
-    std::shared_ptr<GmModelBase> gmModel = mgmModel->get_gm_model(this->gmModelIdx); 
+    std::shared_ptr<GmModel> gmModel = mgmModel->get_gm_model(this->gmModelIdx); 
     return this->evaluate_gm_model_and_subtract_old_labelling(gmModel);
 }
 

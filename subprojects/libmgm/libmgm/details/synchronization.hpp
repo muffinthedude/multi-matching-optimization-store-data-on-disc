@@ -11,8 +11,8 @@ std::shared_ptr<MgmModelBase> build_sync_problem(std::shared_ptr<MgmModelBase> m
 
 namespace details {
 
-std::shared_ptr<GmModelBase>  create_feasible_sync_model(std::shared_ptr<GmModelBase> model, GmSolution& solution, io::disc_save_mode save_mode);
-std::shared_ptr<GmModelBase>  create_infeasible_sync_model(std::shared_ptr<GmModelBase> model, GmSolution& solution, io::disc_save_mode save_mode);
+std::shared_ptr<GmModel>  create_feasible_sync_model(std::shared_ptr<GmModel> model, GmSolution& solution, io::disc_save_mode save_mode);
+std::shared_ptr<GmModel>  create_infeasible_sync_model(std::shared_ptr<GmModel> model, GmSolution& solution, io::disc_save_mode save_mode);
 
 }
 }

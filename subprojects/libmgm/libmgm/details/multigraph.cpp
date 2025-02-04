@@ -9,15 +9,11 @@ namespace mgm {
     
 Graph::Graph(int id, int no_nodes) : id(id), no_nodes(no_nodes) {};
 
-GmModelBase::GmModelBase(Graph g1, Graph g2, int no_assignments, int no_edges): 
+GmModel::GmModel(Graph g1, Graph g2, int no_assignments, int no_edges): 
     graph1(g1), 
     graph2(g2),
     no_assignments(no_assignments),
-    no_edges(no_edges) {}
-
-GmModel::GmModel(Graph g1, Graph g2, int no_assignments, int no_edges) 
-    : 
-    GmModelBase(g1, g2, no_assignments, no_edges)
+    no_edges(no_edges)
     {
     this->costs = std::make_unique<CostMap>(no_assignments, no_edges);
     this->assignment_list.reserve(no_assignments);
@@ -69,22 +65,22 @@ MgmModel::MgmModel(){
     //models.reserve(300);
 }
 
-void MgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
+void MgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) {
     this->models[idx] = gm_model;
     this->model_keys.push_back(idx);
     this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 
-std::shared_ptr<GmModelBase> MgmModel::get_gm_model(const GmModelIdx& idx) {
+std::shared_ptr<GmModel> MgmModel::get_gm_model(const GmModelIdx& idx) {
     return this->models.at(idx);
 }
 
-void SqlMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
+void SqlMgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) {
     this->save_model_to_db(gm_model, idx);
     this->model_keys.push_back(idx);
     this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
-std::shared_ptr<GmModelBase> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
+std::shared_ptr<GmModel> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
     if (this->bulk_load_mode or this->paralel_loading_mode) {
         auto process_it = this->process_cache->find(idx);
         if (process_it != this->process_cache->end()) {
@@ -96,7 +92,7 @@ std::shared_ptr<GmModelBase> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
             return it->second;
         }
     }
-    std::shared_ptr<GmModelBase> gmModel = this->read_model_from_db(idx);
+    std::shared_ptr<GmModel> gmModel = this->read_model_from_db(idx);
     if (not this->paralel_loading_mode) {
         if (this->cache_queue.size() == this->number_of_cached_models) {
             GmModelIdx idxOfModelToBeErased = this->cache_queue.front();
@@ -165,7 +161,7 @@ void SqlMgmModel::delete_table() {
     sqlite3_finalize(delete_statement);
 }
 
-void SqlMgmModel::save_model_to_db(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
+void SqlMgmModel::save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) {
     // bind statement
     int rc = sqlite3_bind_int(this->insert_stmt, 1, idx.first);
     if (rc != SQLITE_OK) {
@@ -189,7 +185,7 @@ void SqlMgmModel::save_model_to_db(std::shared_ptr<GmModelBase> gm_model, const 
     rc = sqlite3_reset(this->insert_stmt);
 }
 
-std::shared_ptr<GmModelBase> SqlMgmModel::read_model_from_db(const GmModelIdx& idx) {
+std::shared_ptr<GmModel> SqlMgmModel::read_model_from_db(const GmModelIdx& idx) {
     // bind to statement
     int rc = sqlite3_bind_int(this->read_stmt, 1, idx.first);
     if (rc != SQLITE_OK) {
@@ -211,7 +207,7 @@ std::shared_ptr<GmModelBase> SqlMgmModel::read_model_from_db(const GmModelIdx& i
         std::cerr << "No data found!" << "\n";
     }
     rc = sqlite3_reset(this->read_stmt);
-    std::shared_ptr<GmModelBase> gmModelPtr = deserialize_serialized_model(read_serialized_model);
+    std::shared_ptr<GmModel> gmModelPtr = deserialize_serialized_model(read_serialized_model);
     return gmModelPtr;
 }
 
@@ -279,7 +275,7 @@ void SqlMgmModel::bulk_read_to_load_cache(const int& model_id) {
     sqlite3_finalize(sql_stmt);
 }
 
-void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase> gmModel) {
+void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModel> gmModel) {
     std::ostringstream output_stream;
         {
             
@@ -290,8 +286,8 @@ void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModelBase
     result_string = output_stream.str();
 }
 
-std::shared_ptr<GmModelBase> deserialize_serialized_model(std::string& serialized_model) {
-    std::shared_ptr<GmModelBase> gmModel;
+std::shared_ptr<GmModel> deserialize_serialized_model(std::string& serialized_model) {
+    std::shared_ptr<GmModel> gmModel;
     {
         std::istringstream iss(serialized_model);
         cereal::BinaryInputArchive iarchive(iss);
@@ -305,10 +301,10 @@ SqlMgmModel::SqlMgmModel() {
     this->create_table();
     this->set_up_write_statement();
     this->set_up_read_statement();
-    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> load;
-    this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(load);
-    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> process;
-    this->process_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(process);
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> load;
+    this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>>(load);
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> process;
+    this->process_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>>(process);
 }
 SqlMgmModel::~SqlMgmModel() {
     sqlite3_finalize(this->read_stmt);
@@ -336,13 +332,13 @@ RocksdbMgmModel::RocksdbMgmModel() {
     this->open_db();
     this->write_options = rocksdb::WriteOptions();
     this->read_options = rocksdb::ReadOptions();
-    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> load;
-    this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(load);
-    std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash> process;
-    this->process_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModelBase>, GmModelIdxHash>>(process);
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> load;
+    this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>>(load);
+    std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> process;
+    this->process_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>>(process);
 }
 
-void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const GmModelIdx& idx) {
+void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) {
     std::string serialized_model;
     serialize_to_binary(serialized_model, gm_model);
     rocksdb::Status status = db->Put(this->write_options, this->convert_idx_into_string(idx), serialized_model);
@@ -355,7 +351,7 @@ void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModelBase> gm_model, const
     this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
 
-std::shared_ptr<GmModelBase> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
+std::shared_ptr<GmModel> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
     if (this->bulk_load_mode or this->paralel_loading_mode) {
         auto it = this->process_cache->find(idx);
         if (it != this->process_cache->end()) {
@@ -373,7 +369,7 @@ std::shared_ptr<GmModelBase> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx
     if (!status.ok()) {
         std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
     }
-    std::shared_ptr<GmModelBase> gmModel = deserialize_serialized_model(retrieved_serialized_model);
+    std::shared_ptr<GmModel> gmModel = deserialize_serialized_model(retrieved_serialized_model);
     if (not this->paralel_loading_mode) {
         if (this->cache_queue.size() == this->number_of_cached_models) {
             GmModelIdx idxOfModelToBeErased = this->cache_queue.front();

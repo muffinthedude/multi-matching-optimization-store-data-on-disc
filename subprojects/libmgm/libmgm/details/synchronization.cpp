@@ -32,14 +32,14 @@ std::shared_ptr<MgmModelBase> build_sync_problem(std::shared_ptr<MgmModelBase> m
 
     int i = 0;
     for (const auto& key : model->model_keys) {  // TODO: this is not working for SqlMgmModel
-        std::shared_ptr<GmModelBase> gm_model = model->get_gm_model(key);
+        std::shared_ptr<GmModel> gm_model = model->get_gm_model(key);
 
         // Progress, prints iterations on terminal.
         i++;
         std::cout << i << "/" << model->model_keys.size() << " \r";
         std::cout.flush();
 
-        std::shared_ptr<GmModelBase> sync_gm_model;
+        std::shared_ptr<GmModel> sync_gm_model;
 
         if (feasible) {
             // only allow assignments that are present
@@ -57,9 +57,9 @@ std::shared_ptr<MgmModelBase> build_sync_problem(std::shared_ptr<MgmModelBase> m
 
 
 namespace details {
-std::shared_ptr<GmModelBase>  create_feasible_sync_model(std::shared_ptr<GmModelBase> model, GmSolution& solution, io::disc_save_mode save_mode) {
+std::shared_ptr<GmModel>  create_feasible_sync_model(std::shared_ptr<GmModel> model, GmSolution& solution, io::disc_save_mode save_mode) {
 
-    std::shared_ptr<GmModelBase> sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
+    std::shared_ptr<GmModel> sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
     
     // Copy assignments
     // TODO: This is unnecessarily inefficient. Cost datastructure might be too restricted.
@@ -80,9 +80,9 @@ std::shared_ptr<GmModelBase>  create_feasible_sync_model(std::shared_ptr<GmModel
     return sync_model;
 }
 
-std::shared_ptr<GmModelBase>  create_infeasible_sync_model(std::shared_ptr<GmModelBase> model, GmSolution& solution, io::disc_save_mode save_mode) {
+std::shared_ptr<GmModel>  create_infeasible_sync_model(std::shared_ptr<GmModel> model, GmSolution& solution, io::disc_save_mode save_mode) {
     int no_assignments = model->graph1.no_nodes * model->graph2.no_nodes;
-    std::shared_ptr<GmModelBase> sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
+    std::shared_ptr<GmModel> sync_model = std::make_shared<GmModel>(model->graph1, model->graph2, model->no_assignments, 0);
 
     // Initialize all costs to 0
     int idx = 0;

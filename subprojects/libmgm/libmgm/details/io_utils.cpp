@@ -83,7 +83,7 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             model->graphs[g1_id] = g1;
             model->graphs[g2_id] = g2;
 
-            std::shared_ptr<GmModelBase> gmModel = std::make_shared<GmModel>(g1, g2, no_a, no_e);
+            std::shared_ptr<GmModel> gmModel = std::make_shared<GmModel>(g1, g2, no_a, no_e);
             
             int ass_id = 0;
             int id1 = 0;
@@ -168,7 +168,7 @@ std::shared_ptr<MgmModelBase> parse_dd_file_fscan(fs::path dd_file) {
         model.graphs[g1_id] = g1;
         model.graphs[g2_id] = g2;
 
-        std::shared_ptr<GmModelBase> gmModel;
+        std::shared_ptr<GmModel> gmModel;
         gmModel = std::make_shared<GmModel>(g1, g2, no_a, no_e);
 
         int ass_id = 0;
@@ -231,7 +231,7 @@ void safe_to_disk(const MgmSolution& solution, fs::path outPath, std::string fil
     for (auto const& [key, s] : solution.gmSolutions) {
         json json_labeling = null_valued_labeling(s.labeling);
 
-        std::shared_ptr<GmModelBase> gmModel = solution.model->get_gm_model(key);
+        std::shared_ptr<GmModel> gmModel = solution.model->get_gm_model(key);
         std::string key_string = fmt::format("{}, {}", gmModel->graph1.id, gmModel->graph2.id);
         j["labeling"][key_string] = json_labeling; 
     }

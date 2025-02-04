@@ -19,12 +19,12 @@ class GmSolution {
         std::vector<int> old_labeling;
 
         // For use with models saved in memory 
-        GmSolution(std::shared_ptr<GmModelBase> model);
+        GmSolution(std::shared_ptr<GmModel> model);
         double evaluate() const;
-        std::shared_ptr<GmModelBase> model;
+        std::shared_ptr<GmModel> model;
 
         // For use with models saved on disc
-        GmSolution(std::shared_ptr<GmModelBase> model, GmModelIdx gmModelIdx);
+        GmSolution(std::shared_ptr<GmModel> model, GmModelIdx gmModelIdx);
         GmSolution(std::shared_ptr<MgmModelBase> model, GmModelIdx gmModelIdx);
         double evaluate(const std::shared_ptr<MgmModelBase> mgmModel) const;
         double evaluate_and_subtract_old_labelling(const std::shared_ptr<MgmModelBase> mgmModel) const;
@@ -33,8 +33,8 @@ class GmSolution {
     private:
         bool is_active(AssignmentIdx assignment) const;
         bool was_active(AssignmentIdx assignment) const;
-        double evaluate_gm_model(std::shared_ptr<GmModelBase> gmModel) const;
-        double evaluate_gm_model_and_subtract_old_labelling(std::shared_ptr<GmModelBase> gmModel) const;
+        double evaluate_gm_model(std::shared_ptr<GmModel> gmModel) const;
+        double evaluate_gm_model_and_subtract_old_labelling(std::shared_ptr<GmModel> gmModel) const;
 };
 
 class MgmSolution {
