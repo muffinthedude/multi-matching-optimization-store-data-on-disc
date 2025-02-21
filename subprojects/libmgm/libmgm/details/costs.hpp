@@ -66,6 +66,12 @@ class CostMap {
         const AssignmentContainer&  all_assignments()   const { return assignments; }
         const EdgeContainer&        all_edges()         const { return edges; }
 
+        const size_t all_assignments_size()          const { return assignments.size(); }
+        const size_t all_edges_size()                const { return edges.size(); }
+
+        const size_t all_assignments_num_buckets()   const { return assignments.bucket_count(); }
+        const size_t all_edges_num_buckets()         const { return edges.bucket_count(); }
+
         // rule of five
         CostMap(const CostMap& other)             = default;
         CostMap(CostMap&& other)                  = default;

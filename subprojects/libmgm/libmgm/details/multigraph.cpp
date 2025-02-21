@@ -61,6 +61,22 @@ void GmModel::serialize_to_binary(std::string& result_string) const {
     result_string = output_stream.str();
 }
 
+int GmModel::estimate_memory_consumption() {
+    int map_memory_consumption = 112 + this->assignment_list.size() * 8;
+    for (auto& sub_list: this->assignments_left) {
+        map_memory_consumption += sub_list.size() * 8 + 24;
+    }
+    for (auto& sub_list: this->assignments_right) {
+        map_memory_consumption += sub_list.size() * 8 + 24;
+    }
+
+    map_memory_consumption += this->costs->all_assignments_size() * (16 + sizeof(void*));
+    map_memory_consumption += 56 + this->costs->all_assignments_num_buckets() * 8;
+    map_memory_consumption += this->costs->all_edges_size() * (16 + sizeof(void*)) + 56 + this->costs->all_edges_num_buckets() * 8; 
+
+    return map_memory_consumption;
+}
+
 MgmModel::MgmModel(){ 
     //models.reserve(300);
 }
@@ -352,6 +368,10 @@ void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmM
 }
 
 std::shared_ptr<GmModel> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
+    auto it = this->static_cache.find(idx);
+    if (it != this->static_cache.end()) {
+        return it->second;
+    }
     if (this->bulk_load_mode or this->paralel_loading_mode) {
         auto it = this->process_cache->find(idx);
         if (it != this->process_cache->end()) {
@@ -447,6 +467,78 @@ RocksdbMgmModel::~RocksdbMgmModel() {
     rocksdb::Status status = rocksdb::DestroyDB("modelsdb", rocksdb::Options());
     if (!status.ok()) {
         std::cerr << "Error deleting database: " << status.ToString() << std::endl;
+    }
+}
+
+void MgmModelBase::build_caches(long long memory_limit, long long max_memory_model) {
+    memory_limit = memory_limit - 2 * max_memory_model;
+    int max_number_of_models_in_memory = memory_limit / max_memory_model;
+    if (this->paralel_loading_mode) {
+        if (max_number_of_models_in_memory < 2 * (this->no_graphs - 1)) {
+            this->paralel_loading_mode = false;  // not enough space to use parallel loading efficiently (Warning?)
+        } else {
+            max_number_of_models_in_memory -= 2 * (this->no_graphs - 1);
+            std::vector<GmModelIdx> keys;
+        }
+    }
+    if (!this->paralel_loading_mode) {
+        if (max_number_of_models_in_memory < this->no_graphs - 1) {
+            spdlog::warn("Not enough RAM for efficicient seqseq mode. Programm will slow down considerably!");
+        } else if (max_number_of_models_in_memory + 2 >= this->model_keys.size() ){
+            this->distribute_models_in_static_cache_while_in_parallel_mode(max_number_of_models_in_memory + 2);
+        } else {
+            max_number_of_models_in_memory -= this->no_graphs - 1;
+            this->distribute_models_in_static_cache_while_in_parallel_mode(max_number_of_models_in_memory);
+        }
+    }
+};
+
+void MgmModelBase::distribute_models_in_static_cache_while_in_parallel_mode(int number_of_models_in_static_cache) {
+    int number_of_models_to_write_to_cache = (this->model_keys.size() > number_of_models_in_static_cache)? number_of_models_in_static_cache: this->model_keys.size();
+    std::unordered_map<int, std::unordered_set<int>> model_ids_count;
+    std::unordered_set<int> model_ids;
+    for (const Graph& graph: this->graphs) {
+        model_ids.insert(graph.id);
+    }
+    model_ids_count[0] = model_ids;
+    int iteration = 0;
+    while(number_of_models_to_write_to_cache > 0) {
+        while (!model_ids_count[iteration].empty() and number_of_models_to_write_to_cache > 0) {
+            auto model_ids_it = model_ids_count[iteration].begin();
+            int first = *model_ids_it;
+            this->distribute_models_iteration(model_ids_count, first, iteration, iteration);
+            --number_of_models_to_write_to_cache;
+        }
+        ++iteration;
+    }
+}
+
+void MgmModelBase::distribute_models_iteration(std::unordered_map<int, std::unordered_set<int>>& models_count, const int first, int iteration, const int& original_iteration) {
+    if (models_count.find(iteration) == models_count.end()) {
+        models_count[iteration] = std::unordered_set<int>();
+    }
+    for (const int graph_id: models_count[iteration]) {
+        if (first == graph_id) {
+            continue;
+        }
+        GmModelIdx model_id = (first < graph_id)? GmModelIdx(first, graph_id): GmModelIdx(graph_id, first);
+        if (this->static_cache.find(model_id) == this->static_cache.end()) {
+            this->static_cache[model_id] = this->get_gm_model(model_id);
+            models_count[original_iteration].erase(first);
+            if (models_count.find(original_iteration + 1) == models_count.end()) {
+                models_count[original_iteration + 1] = std::unordered_set<int>();
+            }
+            models_count[original_iteration + 1].insert(first);
+            models_count[iteration].erase(graph_id);
+            if (models_count.find(iteration + 1) == models_count.end()) {
+                models_count[iteration + 1] = std::unordered_set<int>();
+            }
+            models_count[iteration + 1].insert(graph_id);
+            break;
+        }
+    }
+    if (models_count[original_iteration].find(first) != models_count[original_iteration].end()) {
+        this->distribute_models_iteration(models_count, first, iteration+1, original_iteration);
     }
 }
 

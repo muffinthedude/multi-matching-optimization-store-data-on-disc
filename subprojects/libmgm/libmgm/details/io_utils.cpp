@@ -27,7 +27,8 @@ const std::regex re_p("^p ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$");
 const std::regex re_a("^a ([0-9]+) ([0-9]+) ([0-9]+) (.+)$");
 const std::regex re_e("^e ([0-9]+) ([0-9]+) (.+)$");
 
-std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode save_mode, load_and_process_in_parallel parallel_mode) {
+std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode save_mode, 
+    load_and_process_in_parallel parallel_mode, long long int memory_limit) {
     std::shared_ptr<MgmModelBase> model;
     switch (save_mode) {
         case disc_save_mode::no:
@@ -50,11 +51,13 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             break;
     }
 
+    long long max_gm_model = 0;
+    bool memory_limited = memory_limit != 0;
+
     std::ifstream infile(dd_file);
     std::string line; 
     std::stringstream lineStream;
     std::smatch re_match;
-
     int max_graph_id = 0;
     while (std::getline(infile, line)) {
         if (std::regex_match(line, re_match, re_gm)) {
@@ -110,6 +113,21 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
                 gmModel->add_edge(id1, id2, c);
             }
 
+            if (memory_limited) {
+                long long memory_gm_model = gmModel->estimate_memory_consumption();
+                max_gm_model = std::max(max_gm_model, memory_gm_model);
+                switch (save_mode) {
+                    case disc_save_mode::no:
+                        memory_limit -= gmModel->estimate_memory_consumption();
+                        spdlog::info("Memory Limit: {}", memory_limit);
+                        if (memory_limit - max_gm_model < 0) {
+                            spdlog::error("Not enough memory to load all models. Use disc saving_mode.");
+                            exit(1);
+                        }
+                        break;
+                }
+            }
+
             GmModelIdx idx(g1_id, g2_id);
             model->save_gm_model(gmModel, idx);
         }
@@ -118,6 +136,10 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
 
     model->number_of_cached_models = max_graph_id + 1;
 
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    spdlog::info("Numjber of threads that can bes used {}", numThreads);
+
+    model->build_caches(memory_limit, max_gm_model);
     spdlog::info("Finished parsing model.\n");
     return model;
 }

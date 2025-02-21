@@ -19,7 +19,7 @@ Runner::Runner(ArgParser::Arguments args) : args(args) {
     
     spdlog::info("Loading model...");
 
-    auto mgmModel = mgm::io::parse_dd_file(args.input_file, args.save_mode, args.parallel_cache_mode);
+    auto mgmModel = mgm::io::parse_dd_file(args.input_file, args.save_mode, args.parallel_cache_mode, args.max_memory_in_bytes);
     this->model = mgmModel;
 
     // If run as a synchronizaiton algorithm, transform the model with the given solution.

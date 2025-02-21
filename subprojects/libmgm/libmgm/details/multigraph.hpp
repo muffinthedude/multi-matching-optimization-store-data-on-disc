@@ -13,6 +13,9 @@
 #include <cereal/types/polymorphic.hpp>
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/base_class.hpp>
+#include <spdlog/spdlog.h>
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/ranges.h> 
 
 #include "costs.hpp"
 
@@ -36,7 +39,7 @@ class Graph {
 
         int id;
         int no_nodes;
-
+        
         template <class Archive>
         void serialize(Archive& archive) {
             archive(this->id, this->no_nodes);
@@ -78,6 +81,8 @@ class GmModel {
 
         void serialize_to_binary(std::string& result_string) const;
         void deserialize_from_binary(std::string& serialized_model);
+
+        int estimate_memory_consumption();
         
 };
 
@@ -92,6 +97,7 @@ class MgmModelBase {
         virtual void bulk_read_to_load_cache(std::vector<GmModelIdx> keys) = 0;
         virtual void bulk_read_to_load_cache(const int& model_id) = 0;
         virtual void swap_caches() = 0;
+        virtual void build_caches(long long memory_limit, long long max_memory_model);
 
         int no_graphs;
         std::vector<Graph> graphs;
@@ -99,9 +105,14 @@ class MgmModelBase {
         
         std::vector<GmModelIdx> model_keys;  // maybe use other data structure here to make sure same key is not saved multiple times (set?)
 
+        std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> static_cache;
+
         bool bulk_load_mode = false;
         int number_of_cached_models;
         bool paralel_loading_mode = false;
+    protected:
+        void distribute_models_in_static_cache_while_in_parallel_mode(int number_of_models_in_static_cache);
+        void distribute_models_iteration(std::unordered_map<int, std::unordered_set<int>>& models_count, const int first, int iteration, const int& original_iteration);
     
 };
 
@@ -112,6 +123,7 @@ class MgmModel: public MgmModelBase{
         void bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {};
         void bulk_read_to_load_cache(const int& model_id) {};
         virtual void swap_caches() {};
+        void build_caches(long long memory_limit, long long max_memory_model) override {};
         
         MgmModel();
 
@@ -135,7 +147,7 @@ class SqlMgmModel: public MgmModelBase {
         // for parallel caching
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> load_cache;
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> process_cache;
-        virtual void swap_caches() {};
+        void swap_caches() {};
 
         // Rule of five
         ~SqlMgmModel();
@@ -166,7 +178,7 @@ class RocksdbMgmModel: public MgmModelBase {
         std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
         void bulk_read_to_load_cache(std::vector<GmModelIdx> keys);
         void bulk_read_to_load_cache(const int& model_id);
-        virtual void swap_caches();
+        void swap_caches();
 
         ~RocksdbMgmModel();
 

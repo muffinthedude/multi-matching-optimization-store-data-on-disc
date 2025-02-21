@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <omp.h>
 #include <map>
+#include <algorithm>
 
 #include <libmgm/mgm.hpp>
 
@@ -12,6 +13,10 @@ ArgParser::Arguments ArgParser::parse(int argc, char **argv) {
 
     try {
         this->app.parse((argc), (argv));
+
+        if (args.max_memory != "unlimited") {
+           args.max_memory_in_bytes = this->parse_memory_string_to_int(args.max_memory); 
+        }
 
         this->args.input_file   = fs::absolute(this->args.input_file);
         this->args.output_path  = fs::absolute(this->args.output_path);
@@ -67,4 +72,24 @@ ArgParser::Arguments ArgParser::parse(int argc, char **argv) {
         std::exit((this->app).exit(e));
     }
     return this->args;
+}
+
+long long int ArgParser::parse_memory_string_to_int(std::string& input) {
+    static const std::unordered_map<std::string, double> unit_map = {
+        {"B", 1}, {"KB", 1000}, {"MB", 1000000}, {"GB", 1000000000}, {"TB", 1000000000000}
+    };
+    input.erase(std::remove_if(input.begin(), input.end(), ::isspace), input.end());
+
+    size_t index = 0;
+    while (index < input.size() && isdigit(input[index])) {
+        index++;
+    }
+    long long value = std::stoll(input.substr(0, index));
+    std::string unit = input.substr(index);
+    for (char &c : unit) {
+        c = std::toupper(c);
+    }
+    auto it = unit_map.find(unit);
+    value *= it->second;
+    return value;
 }

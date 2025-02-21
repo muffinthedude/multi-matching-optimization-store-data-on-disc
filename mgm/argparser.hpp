@@ -51,6 +51,8 @@ class ArgParser {
             optimization_mode  mode = optimal;
             mgm::io::disc_save_mode save_mode =  mgm::io::disc_save_mode::no;
             mgm::io::load_and_process_in_parallel parallel_cache_mode = mgm::io::load_and_process_in_parallel::off;
+            std::string max_memory = "unlimited";
+            long long max_memory_in_bytes;
 
             bool synchronize            = false;
             bool synchronize_infeasible = false;
@@ -170,6 +172,13 @@ class ArgParser {
                             "on:        loading and processing in parallel\n"
                             "off:       loading and solving are done sequentially")
             ->transform(CLI::CheckedTransformer(parallel_cache_mode_map, CLI::ignore_case));
+        
+        [[maybe_unused]]		
+        CLI::Option* maximum_memory = app.add_option("--max-memory", this->args.max_memory)
+            ->description("Set maximum RAM that the program is allowed to use");
+    
+    long long int parse_memory_string_to_int(std::string& memory_string);
+
 };
 
 #endif
