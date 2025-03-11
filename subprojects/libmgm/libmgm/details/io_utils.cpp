@@ -35,7 +35,7 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             model = std::make_shared<MgmModel>();
             break;
         case disc_save_mode::sql:
-            model = std::make_shared<SqlMgmModel>();
+            model = std::make_shared<SqlMgmModel>(parallel_mode == load_and_process_in_parallel::on);
             break;
         case disc_save_mode::rocksdb:
             model = std::make_shared<RocksdbMgmModel>();
@@ -45,14 +45,20 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
             break;
     }
 
+    long long max_gm_model = 0;
+    bool memory_limited = memory_limit != 0;
+
+    long long memory_until_write;
+    ParallelDBTasks parallel_saving_to_db(model);
+    std::queue<std::pair<GmModelIdx, std::shared_ptr<GmModel>>> save_to_db_queue;
     switch (parallel_mode) {
         case load_and_process_in_parallel::on:
             model->paralel_loading_mode = true;
+            if (memory_limited) {
+                memory_until_write = memory_limit;
+            }
             break;
     }
-
-    long long max_gm_model = 0;
-    bool memory_limited = memory_limit != 0;
 
     std::ifstream infile(dd_file);
     std::string line; 
@@ -113,33 +119,44 @@ std::shared_ptr<MgmModelBase> parse_dd_file(fs::path dd_file, disc_save_mode sav
                 gmModel->add_edge(id1, id2, c);
             }
 
+            GmModelIdx idx(g1_id, g2_id);
+
             if (memory_limited) {
                 long long memory_gm_model = gmModel->estimate_memory_consumption();
                 max_gm_model = std::max(max_gm_model, memory_gm_model);
                 switch (save_mode) {
                     case disc_save_mode::no:
-                        memory_limit -= gmModel->estimate_memory_consumption();
-                        spdlog::info("Memory Limit: {}", memory_limit);
+                        memory_limit -= memory_gm_model;
                         if (memory_limit - max_gm_model < 0) {
                             spdlog::error("Not enough memory to load all models. Use disc saving_mode.");
                             exit(1);
                         }
                         break;
                 }
+                if (parallel_mode == load_and_process_in_parallel::on and save_mode == disc_save_mode::rocksdb) {  // not working with sql (currently)
+                    memory_until_write -= memory_gm_model;
+                    save_to_db_queue.push(std::pair<GmModelIdx, std::shared_ptr<GmModel>>(idx, gmModel));
+                    if (memory_until_write < 2* memory_gm_model) {
+                        parallel_saving_to_db.work_on_tasks_for_saving_in_db(save_to_db_queue);
+                        memory_until_write = memory_limit;
+                    }
+                    continue;
+                }
             }
-
-            GmModelIdx idx(g1_id, g2_id);
+  
             model->save_gm_model(gmModel, idx);
         }
+    }
+
+    if (!save_to_db_queue.empty()) {
+        parallel_saving_to_db.work_on_tasks_for_saving_in_db(save_to_db_queue);
     }
     model->no_graphs = max_graph_id + 1;
 
     model->number_of_cached_models = max_graph_id + 1;
 
-    unsigned int numThreads = std::thread::hardware_concurrency();
-    spdlog::info("Numjber of threads that can bes used {}", numThreads);
-
     model->build_caches(memory_limit, max_gm_model);
+    spdlog::info("parallel mode: {}", model->paralel_loading_mode);
     spdlog::info("Finished parsing model.\n");
     return model;
 }

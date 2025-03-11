@@ -30,6 +30,7 @@ class LocalSearcher {
         double current_energy = 0.0;
 
         void iterate();
+        void iterate(ParallelDBTasks& parallel_worker);
         void iteration_step(const int& graph_id, const int& idx);
         CliqueManager state;
         std::vector<int> search_order;
@@ -37,6 +38,9 @@ class LocalSearcher {
 
         int last_improved_graph = -1;
         bool should_stop();
+        
+        void parallel_iteration_step(const int& graph_id, const int& idx, const int& next_graph_id);
+        void work_on_tasks(std::queue<std::function<void()>>& tasks, std::mutex& get_task_mutex);
 };
 
 //FIXME: This needs a better name.

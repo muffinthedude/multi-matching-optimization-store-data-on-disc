@@ -41,18 +41,31 @@ namespace mgm
         if (this->model->paralel_loading_mode) {  // preload first model
             this->model->bulk_read_to_load_cache(*this->search_order.begin());
             this->model->swap_caches();
+            ParallelDBTasks parallel_worker(this->model);
+            while (!this->should_stop()) {
+                this->current_step++;
+                this->previous_energy = this->current_energy;
+
+                spdlog::info("Iteration {}. Current energy: {}", this->current_step, this->current_energy);
+
+                this->iterate(parallel_worker);
+
+                spdlog::info("Finished iteration {}\n", this->current_step);
+            }
+        } else {
+            while (!this->should_stop()) {
+                this->current_step++;
+                this->previous_energy = this->current_energy;
+
+                spdlog::info("Iteration {}. Current energy: {}", this->current_step, this->current_energy);
+
+                this->iterate();
+
+                spdlog::info("Finished iteration {}\n", this->current_step);
+            }
         }
 
-        while (!this->should_stop()) {
-            this->current_step++;
-            this->previous_energy = this->current_energy;
-
-            spdlog::info("Iteration {}. Current energy: {}", this->current_step, this->current_energy);
-
-            this->iterate();
-
-            spdlog::info("Finished iteration {}\n", this->current_step);
-        }
+        
 
         spdlog::info("Finished local search. Current energy: {}", this->current_energy);
         return (this->last_improved_graph >= 0);
@@ -82,26 +95,25 @@ namespace mgm
             if (this->current_step > 1  && *graph_id_it == last_improved_graph) {
                 spdlog::info("No improvement since this graph was last checked. Stopping iteration early.");
                 return;
-            }
+            } 
+            this->iteration_step(*graph_id_it, idx);
+            idx++;
+        }
+    }
 
-            if (this->model->paralel_loading_mode) {
-                int graph_id = (std::next(graph_id_it) != this->search_order.end()) ? *std::next(graph_id_it): *this->search_order.begin();
-                std::thread t1([this, graph_id]() {
-                        this->model->bulk_read_to_load_cache(graph_id);
-                    }
-                );
-                std::thread t2([this, graph_id_it, idx]() {
-                        this->iteration_step(*graph_id_it, idx);
-                    }
-                );
-                t1.join();
-                t2.join();
-                this->model->swap_caches();
-            } else {
+    void LocalSearcher::iterate(ParallelDBTasks& parallel_worker) {
+        int idx = 1;
+
+        for (auto graph_id_it = this->search_order.begin(); graph_id_it != this->search_order.end(); ++graph_id_it) {
+            if (this->current_step > 1  && *graph_id_it == last_improved_graph) {
+                spdlog::info("No improvement since this graph was last checked. Stopping iteration early.");
+                return;
+            }
+            int next_graph_id = (std::next(graph_id_it) != this->search_order.end()) ? *std::next(graph_id_it): *this->search_order.begin();
+            std::function<void()> iteration_step = [this, graph_id_it, idx]() {
                 this->iteration_step(*graph_id_it, idx);
-            }
-            
-
+            };
+            parallel_worker.work_on_tasks_for_search(iteration_step, next_graph_id);
             idx++;
         }
     }
@@ -129,6 +141,53 @@ namespace mgm
             else {
                 spdlog::info("Worse solution(Energy: {}) after rematch. Reversing.\n", energy);
             }
+    }
+
+    void LocalSearcher::parallel_iteration_step(const int& graph_id, const int& idx, const int& next_graph_id) {
+        int numThreads = 8;
+        std::queue<std::function<void()>> tasks;
+        std::mutex save_to_cache_mutex;
+        std::mutex get_task_mutex;
+        tasks.push(
+            [this, graph_id, idx]() {
+                this->iteration_step(graph_id, idx);
+            }
+        );
+        for (int id = 0; id < this->model->no_graphs; ++id) {
+            if (id != next_graph_id) {
+                GmModelIdx model_id = (id < next_graph_id)? GmModelIdx(id, next_graph_id): GmModelIdx(next_graph_id, id);
+                if (!this->model->in_static_cache(model_id)) {
+                    tasks.push(
+                        [this, model_id, &save_to_cache_mutex]() {
+                            this->model->save_in_load_cache(model_id, save_to_cache_mutex);
+                        }
+                    );
+                }; 
+            }
+        }
+        std::vector<std::thread> threads;
+        for (int idx = 0; idx < numThreads; ++idx) {
+            threads.emplace_back(&LocalSearcher::work_on_tasks, this, std::ref(tasks), std::ref(get_task_mutex));
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+        
+        this->model->swap_caches();
+    }
+
+    void LocalSearcher::work_on_tasks(std::queue<std::function<void()>>& tasks, std::mutex& get_task_mutex) {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::lock_guard<std::mutex> lock(get_task_mutex);
+                if (tasks.empty()) return;
+                task = tasks.front();
+                tasks.pop();
+            }
+            task();
+        }
     }
 
     bool LocalSearcher::should_stop() {

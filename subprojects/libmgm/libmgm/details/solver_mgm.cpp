@@ -123,23 +123,31 @@ void SequentialGenerator::generate() {
     this->current_state = std::move(this->generation_queue.front());
     this->generation_queue.pop();
 
-    if (this->model->paralel_loading_mode) {
-        int first_model_id = this->current_state.graph_ids[0];
-        int second_model_id = this->generation_queue.front().graph_ids[0];
-        GmModelIdx first_gm_to_load = (first_model_id < second_model_id) ? GmModelIdx(first_model_id, second_model_id): GmModelIdx(second_model_id, first_model_id);
-        this->model->bulk_read_to_load_cache(
-            std::vector<GmModelIdx> {first_gm_to_load}
-        );
-        this->model->swap_caches();
-    }
-
     int step = 1;
     int no_steps = this->generation_queue.size();
 
-    while (!this->generation_queue.empty()) {
-        spdlog::info("Step {}/{}", step, no_steps);
-        this->step();
-        step++;
+    if (this->model->paralel_loading_mode) {
+        std::mutex save_to_cache_mutex;
+
+        int first_model_id = this->current_state.graph_ids[0];
+        int second_model_id = this->generation_queue.front().graph_ids[0];
+        GmModelIdx first_gm_to_load = (first_model_id < second_model_id) ? GmModelIdx(first_model_id, second_model_id): GmModelIdx(second_model_id, first_model_id);
+        if (!this->model->in_static_cache(first_gm_to_load)) {
+            this->model->save_in_load_cache(first_gm_to_load, save_to_cache_mutex);
+            this->model->swap_caches();
+        }
+        ParallelDBTasks parallel_worker(this->model);
+        while (!this->generation_queue.empty()) {
+            spdlog::info("Step {}/{}", step, no_steps);
+            this->step(parallel_worker);
+            step++;
+        }
+    } else {
+        while (!this->generation_queue.empty()) {
+            spdlog::info("Step {}/{}", step, no_steps);
+            this->step();
+            step++;
+        }
     }
 
     MgmSolution sol(this->model);
@@ -173,31 +181,56 @@ std::vector<int> SequentialGenerator::init_generation_sequence(matching_order or
 void SequentialGenerator::step() {
     assert(!this->generation_queue.empty());
     CliqueManager& current  = this->current_state;
+    CliqueManager& next     = this->generation_queue.front();
+    
+    CliqueManager new_manager;
+
+    GmSolution solution         = details::match(current, next, this->model);
+    new_manager   = details::merge(current, next, solution, this->model);
+    this->current_state = new_manager;
+    this->generation_queue.pop();
+}
+
+void SequentialGenerator::step(ParallelDBTasks& parallel_worker) {
+    assert(!this->generation_queue.empty());
+    CliqueManager& current  = this->current_state;
     CliqueManager next     = this->generation_queue.front();
     
     CliqueManager new_manager;
-    if (this->model->paralel_loading_mode) {
-        this->generation_queue.pop();
-        if (this->generation_queue.empty()) {
-            details::match_and_merge(current, next, new_manager, this->model);
-        } else {
-            CliqueManager& next_pre_load = this->generation_queue.front();
-            std::thread t1(details::preload, std::cref(current), std::cref(next), std::cref(next_pre_load.graph_ids[0]), this->model); // bulk_load_here TODO: change given values, handle graph ids instead of just one id maybe
-            std::thread t2(details::match_and_merge, std::cref(current), std::cref(next), std::ref(new_manager), this->model); // compute her
-
-            t1.join();
-            t2.join();
-            this->model->swap_caches();  // swap process and loader here
-        }
-        this->current_state = new_manager;
+    this->generation_queue.pop();
+    if (this->generation_queue.empty()) {
+        details::match_and_merge(current, next, new_manager, this->model);
     } else {
-        GmSolution solution         = details::match(current, next, this->model);
-        new_manager   = details::merge(current, next, solution, this->model);
-        this->current_state = new_manager;
-        this->generation_queue.pop();
+        CliqueManager& next_pre_load = this->generation_queue.front();
+
+        std::function<void()> solver_function = [this, &current, &next, &new_manager]() {
+            details::match_and_merge(current, next, new_manager, this->model);
+        };
+
+        std::vector<int> graph_ids = current.graph_ids;
+        graph_ids.push_back(next.graph_ids[0]);
+        int preload_graph_id = this->generation_queue.front().graph_ids[0];
+
+        parallel_worker.work_on_tasks_for_solver(solver_function, preload_graph_id, graph_ids);
+        
+        this->model->swap_caches();  // swap process and loader here
     }
+    this->current_state = new_manager;
     
 }
+
+void SequentialGenerator::work_on_tasks(std::queue<std::function<void()>>& tasks, std::mutex& get_task_mutex) {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::lock_guard<std::mutex> lock(get_task_mutex);
+                if (tasks.empty()) return;
+                task = tasks.front();
+                tasks.pop();
+            }
+            task();
+        }
+    }
 
 ParallelGenerator::ParallelGenerator(std::shared_ptr<MgmModelBase> model) 
     : MgmGenerator(model) {}

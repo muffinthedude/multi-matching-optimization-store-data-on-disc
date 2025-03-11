@@ -98,6 +98,8 @@ class MgmModelBase {
         virtual void bulk_read_to_load_cache(const int& model_id) = 0;
         virtual void swap_caches() = 0;
         virtual void build_caches(long long memory_limit, long long max_memory_model);
+        virtual void save_in_load_cache(const GmModelIdx& model_id, std::mutex& save_to_cache_mutex) {};
+        bool in_static_cache(const GmModelIdx& model_id) {return this->static_cache.find(model_id) != this->static_cache.end();}
 
         int no_graphs;
         std::vector<Graph> graphs;
@@ -133,11 +135,12 @@ class MgmModel: public MgmModelBase{
 class SqlMgmModel: public MgmModelBase {
     public:
         SqlMgmModel();
+        SqlMgmModel(bool parallel_mode_on);
 
         void save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) override;
         std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
         
-        void save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx);
+        void save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx, sqlite3_stmt* insert_to_db_stmt);
         std::shared_ptr<GmModel> read_model_from_db(const GmModelIdx& idx);
         void bulk_read_to_load_cache(std::vector<GmModelIdx> keys);
         void bulk_read_to_load_cache(const int& model_id);
@@ -148,6 +151,7 @@ class SqlMgmModel: public MgmModelBase {
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> load_cache;
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> process_cache;
         void swap_caches() {};
+        void save_in_load_cache(const GmModelIdx model_idx, std::mutex& save_to_cache_mutex);
 
         // Rule of five
         ~SqlMgmModel();
@@ -163,12 +167,15 @@ class SqlMgmModel: public MgmModelBase {
         void set_up_read_statement();
         void delete_table();
         // void deserialize_serialized_model(std::string& serialized_model, GmModel& model);
-
+        void setup_db_connections_for_parallel_tasks(const int& number_of_connections);
         sqlite3* db;
         sqlite3_stmt* insert_stmt;
         sqlite3_stmt* read_stmt;
         std::queue<GmModelIdx> cache_queue;
-        
+        std::mutex connection_mutex;
+        std::queue<sqlite3*> connections;
+        std::queue<sqlite3_stmt*> read_pool;
+        std::queue<sqlite3_stmt*> write_pool;
 };
 
 class RocksdbMgmModel: public MgmModelBase {
@@ -179,6 +186,7 @@ class RocksdbMgmModel: public MgmModelBase {
         void bulk_read_to_load_cache(std::vector<GmModelIdx> keys);
         void bulk_read_to_load_cache(const int& model_id);
         void swap_caches();
+        void save_in_load_cache(const GmModelIdx model_idx, std::mutex& save_to_cache_mutex);
 
         ~RocksdbMgmModel();
 
@@ -197,6 +205,26 @@ class RocksdbMgmModel: public MgmModelBase {
 
         std::queue<GmModelIdx> cache_queue;
         
+};
+
+class ParallelDBTasks {
+    public:
+        ParallelDBTasks(std::shared_ptr<MgmModelBase> model): model(model) {};
+        void work_on_tasks_for_solver(std::function<void()> solver_function, const int& preload_graph_id, const std::vector<int>& graph_ids);
+        void work_on_tasks_for_search(std::function<void()> search_function, const int& next_graph_id);
+        void work_on_tasks_for_saving_in_db(std::queue<std::pair<GmModelIdx, std::shared_ptr<GmModel>>>& gm_models);
+        void add_task(std::function<void()> task);
+
+    protected:
+        std::shared_ptr<MgmModelBase> model;
+        int numThreads = 8;
+        std::unordered_map<GmModelIdx, bool, GmModelIdxHash> in_static_cache_map;
+        std::queue<std::function<void()>> tasks;
+        std::mutex task_mutex;
+        std::mutex cache_mutex;
+
+        void thread_work_on_tasks();
+        void work_on_tasks();
 };
 
 }

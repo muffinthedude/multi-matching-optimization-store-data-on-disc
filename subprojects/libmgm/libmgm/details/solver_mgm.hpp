@@ -71,6 +71,8 @@ class SequentialGenerator : public MgmGenerator {
         std::queue<CliqueManager> generation_queue;
 
         void step();
+        void step(ParallelDBTasks& parallel_worker);
+        void work_on_tasks(std::queue<std::function<void()>>& tasks, std::mutex& get_task_mutex);
 };
 
 class ParallelGenerator : public MgmGenerator {
