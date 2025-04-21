@@ -13,12 +13,13 @@ enum disc_save_mode {
     rocksdb
 };
 
-enum load_and_process_in_parallel {
-    on,
-    off
+enum cache_mode {
+    recent,
+    preload,
+    bulk
 };
 
-std::shared_ptr<MgmModelBase> parse_dd_file(std::filesystem::path dd_file, disc_save_mode save_mode, load_and_process_in_parallel parallel_mode, long long int memory_limit = 0);
+std::shared_ptr<MgmModelBase> parse_dd_file(std::filesystem::path dd_file, disc_save_mode save_mode, cache_mode cache_mode_setter, long long int memory_limit = 0);
 std::shared_ptr<MgmModelBase> parse_dd_file_fscan(std::filesystem::path dd_file, disc_save_mode save_mode);
 
 void safe_to_disk(const MgmSolution& solution, std::filesystem::path outPath, std::string filename);

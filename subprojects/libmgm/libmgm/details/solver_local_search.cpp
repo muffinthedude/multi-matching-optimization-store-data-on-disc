@@ -14,24 +14,24 @@
 #include "solver_local_search.hpp"
 namespace mgm
 {
-    LocalSearcher::LocalSearcher(CliqueManager state, std::shared_ptr<MgmModelBase> model)
-    : state(state), model(model) {
-        auto sol = MgmSolution(model);
-        sol.build_from(state.cliques);
+    LocalSearcher::LocalSearcher(CliqueManager state, std::shared_ptr<MgmModelBase> model, MgmSolution& solution)
+    : state(state), model(model), best_solution(solution){
+        // auto sol = MgmSolution(model);
+        // sol.build_from(state.cliques);
 
-        this->current_energy = sol.evaluate();
+        this->current_energy = best_solution.evaluate();
         
         this->search_order = std::vector<int>(model->no_graphs);
         std::iota(this->search_order.begin(), this->search_order.end(), 0);
     };
 
-    LocalSearcher::LocalSearcher(CliqueManager state, std::vector<int> search_order, std::shared_ptr<MgmModelBase> model)
-        : state(state), search_order(search_order), model(model) {
-        auto sol = MgmSolution(model);
-        sol.build_from(state.cliques);
+    LocalSearcher::LocalSearcher(CliqueManager state, std::vector<int> search_order, std::shared_ptr<MgmModelBase> model, MgmSolution& solution)
+        : state(state), search_order(search_order), model(model), best_solution(solution) {
+        // auto sol = MgmSolution(model);
+        // sol.build_from(state.cliques);
 
-        this->current_energy = sol.evaluate();
-    };
+        this->current_energy = best_solution.evaluate();
+    };  
 
     bool LocalSearcher::search() {
         this->current_step = 0;
@@ -52,6 +52,17 @@ namespace mgm
 
                 spdlog::info("Finished iteration {}\n", this->current_step);
             }
+        } else if (this->model->bulk_load_mode) {
+              while (!this->should_stop()) {
+                this->current_step++;
+                this->previous_energy = this->current_energy;
+
+                spdlog::info("Iteration {}. Current energy: {}", this->current_step, this->current_energy);
+
+                this->iterate_bulk();
+
+                spdlog::info("Finished iteration {}\n", this->current_step);
+            }  
         } else {
             while (!this->should_stop()) {
                 this->current_step++;
@@ -82,10 +93,10 @@ namespace mgm
 
     MgmSolution LocalSearcher::export_solution() {
         spdlog::info("Exporting solution...");
-        MgmSolution sol(this->model);
-        sol.build_from(this->state.cliques);
+        // MgmSolution sol(this->model);
+        // sol.build_from(this->state.cliques);
         
-        return sol;
+        return this->best_solution;
     }
 
     void LocalSearcher::iterate() {
@@ -96,6 +107,21 @@ namespace mgm
                 spdlog::info("No improvement since this graph was last checked. Stopping iteration early.");
                 return;
             } 
+            this->iteration_step(*graph_id_it, idx);
+            idx++;
+        }
+    }
+
+        void LocalSearcher::iterate_bulk() {
+        int idx = 1;
+
+        for (auto graph_id_it = this->search_order.begin(); graph_id_it != this->search_order.end(); ++graph_id_it) {
+            if (this->current_step > 1  && *graph_id_it == last_improved_graph) {
+                spdlog::info("No improvement since this graph was last checked. Stopping iteration early.");
+                return;
+            }
+            this->model->bulk_read_to_load_cache(*graph_id_it);
+            this->model->swap_caches();
             this->iteration_step(*graph_id_it, idx);
             idx++;
         }
@@ -114,6 +140,7 @@ namespace mgm
                 this->iteration_step(*graph_id_it, idx);
             };
             parallel_worker.work_on_tasks_for_search(iteration_step, next_graph_id);
+            this->model->swap_caches();
             idx++;
         }
     }
@@ -130,12 +157,14 @@ namespace mgm
             spdlog::info("Constructing new solution...");
             auto mgm_sol = MgmSolution(model);
             mgm_sol.build_from(new_manager.cliques, this->state.cliques);
+            mgm_sol.update_solution(graph_id);
             double energy = mgm_sol.evaluate_starting_from_old_energy(this->current_energy, graph_id);
 
             if (energy < this->current_energy) { 
                 this->state = new_manager;
                 this->current_energy = energy;
                 this->last_improved_graph = graph_id;
+                this->best_solution = mgm_sol;
                 spdlog::info("Better solution found. Previous energy: {} ---> Current energy: {}", this->previous_energy, this->current_energy);
             }
             else {

@@ -93,7 +93,7 @@ void CliqueManager::reconstruct_from(CliqueTable table) {
 }
 
 MgmGenerator::MgmGenerator(std::shared_ptr<MgmModelBase> model) 
-    : model(model) {}
+    : model(model), partial_solution(MgmSolution(model)) {}
 
 MgmSolution MgmGenerator::export_solution() {
     spdlog::info("Exporting solution...");
@@ -142,18 +142,24 @@ void SequentialGenerator::generate() {
             this->step(parallel_worker);
             step++;
         }
+    } else if (this->model->bulk_load_mode) {
+        while (!this->generation_queue.empty()) {
+            spdlog::info("Step {}/{}", step, no_steps);   
+            this->step_bulk();
+            step++;
+        }
     } else {
         while (!this->generation_queue.empty()) {
-            spdlog::info("Step {}/{}", step, no_steps);
+            spdlog::info("Step {}/{}", step, no_steps);   
             this->step();
             step++;
         }
     }
 
-    MgmSolution sol(this->model);
-    sol.build_from(this->current_state.cliques);
+    // MgmSolution sol(this->model);
+    // sol.build_from(this->current_state.cliques);
 
-    spdlog::info("Constructed solution. Current energy: {}", sol.evaluate());
+    spdlog::info("Constructed solution. Current energy: {}", this->partial_solution.evaluate());
     spdlog::info("Finished sequential generation.\n");
 }
 
@@ -187,6 +193,23 @@ void SequentialGenerator::step() {
 
     GmSolution solution         = details::match(current, next, this->model);
     new_manager   = details::merge(current, next, solution, this->model);
+    this->partial_solution.extend_solution(new_manager.cliques, next.graph_ids[0], current.graph_ids);
+    this->current_state = new_manager;
+    this->generation_queue.pop();
+}
+
+void SequentialGenerator::step_bulk() {
+    assert(!this->generation_queue.empty());
+    CliqueManager& current  = this->current_state;
+    CliqueManager& next     = this->generation_queue.front();
+    this->model->bulk_read_to_load_cache(current.graph_ids, next.graph_ids);
+    this->model->swap_caches();
+    
+    CliqueManager new_manager;
+
+    GmSolution solution         = details::match(current, next, this->model);
+    new_manager   = details::merge(current, next, solution, this->model);
+    this->partial_solution.extend_solution(new_manager.cliques, next.graph_ids[0], current.graph_ids);
     this->current_state = new_manager;
     this->generation_queue.pop();
 }
@@ -199,12 +222,12 @@ void SequentialGenerator::step(ParallelDBTasks& parallel_worker) {
     CliqueManager new_manager;
     this->generation_queue.pop();
     if (this->generation_queue.empty()) {
-        details::match_and_merge(current, next, new_manager, this->model);
+        details::match_and_merge(current, next, new_manager, this->model, this->partial_solution);
     } else {
         CliqueManager& next_pre_load = this->generation_queue.front();
 
         std::function<void()> solver_function = [this, &current, &next, &new_manager]() {
-            details::match_and_merge(current, next, new_manager, this->model);
+            details::match_and_merge(current, next, new_manager, this->model, this->partial_solution);
         };
 
         std::vector<int> graph_ids = current.graph_ids;
@@ -360,7 +383,6 @@ CliqueManager merge(const CliqueManager& manager_1, const CliqueManager& manager
         new_manager.cliques.add_clique(new_clique);
         clique_idx++;
     }
-
     // Add remaining cliques (May happen in parallel local search mode, when outdated solution has less labels than current manager's no_cliques)
     while (clique_idx < manager_1.cliques.no_cliques) {
         auto new_clique = manager_1.cliques[clique_idx];
@@ -377,26 +399,18 @@ CliqueManager merge(const CliqueManager& manager_1, const CliqueManager& manager
 
         clique_m_2++;
     }
-    
     new_manager.build_clique_idx_view();
     return new_manager;
 }
 
-void match_and_merge(const CliqueManager& manager_1, const CliqueManager& manager_2, CliqueManager& result_manager, const std::shared_ptr<MgmModelBase> model) {
+void match_and_merge(const CliqueManager& manager_1, const CliqueManager& manager_2, CliqueManager& result_manager, const std::shared_ptr<MgmModelBase> model, MgmSolution& model_solution) {
     GmSolution solution = match(manager_1, manager_2, model);
     result_manager = merge(manager_1, manager_2, solution, model);
+    model_solution.extend_solution(result_manager.cliques, manager_2.graph_ids[0], manager_1.graph_ids);
 }
 
 void preload(const CliqueManager& manager_1, const CliqueManager& manager_2, const int& preload_graph_id, std::shared_ptr<MgmModelBase> model) {
-    std::vector<int> preload_graph_ids = manager_1.graph_ids;
-    for (const int& graph_id: manager_2.graph_ids) {
-        preload_graph_ids.push_back(graph_id);
-    }  // don't do this, instead exchange when swapping
-    std::vector<mgm::GmModelIdx> preload_model_ids(preload_graph_ids.size());
-    for (int i = 0; i < preload_model_ids.size(); ++i) {
-        preload_model_ids[i] = (preload_graph_ids[i] < preload_graph_id) ? GmModelIdx(preload_graph_ids[i], preload_graph_id): GmModelIdx(preload_graph_id, preload_graph_ids[i]);
-    }
-    model->bulk_read_to_load_cache(preload_model_ids);
+    model->bulk_read_to_load_cache(manager_1.graph_ids, manager_2.graph_ids);
 }
 
 std::pair<CliqueManager, CliqueManager> split(const CliqueManager &manager, int graph_id, const std::shared_ptr<MgmModelBase> model) {
@@ -464,16 +478,6 @@ void CliqueMatcher::collect_assignments() {
     // In Python, this is the new implementation, but I have doubts, if this is in fact faster.
 
     // For all graph pairs
-    if (this->model->bulk_load_mode) {
-        std::vector<GmModelIdx> graph_pair_idxes;
-        graph_pair_idxes.reserve(this->manager_1.graph_ids.size() * this->manager_2.graph_ids.size());
-        for (const auto& g1 : this->manager_1.graph_ids) {
-            for (const auto& g2 : this->manager_2.graph_ids) {
-                graph_pair_idxes.emplace_back((g1 < g2) ? GmModelIdx(g1, g2) : GmModelIdx(g2, g1));
-            }
-        }
-        this->model->bulk_read_to_load_cache(graph_pair_idxes);
-    }
     for (const auto& g1 : this->manager_1.graph_ids) {
         for (const auto& g2 : this->manager_2.graph_ids) {
             bool is_sorted = (g1 < g2);

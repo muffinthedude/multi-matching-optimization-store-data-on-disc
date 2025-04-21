@@ -47,7 +47,7 @@ namespace mgm {
 
     void IncrementalGenerator::improve() {
         auto search_order = std::vector<int>(this->generation_sequence.begin(), this->generation_sequence.begin() + this->subset_size);
-        auto local_searcher = LocalSearcher(this->current_state, search_order, this->model);
+        auto local_searcher = LocalSearcher(this->current_state, search_order, this->model, this->partial_solution);
         local_searcher.search();
 
         this->current_state = local_searcher.export_CliqueManager();

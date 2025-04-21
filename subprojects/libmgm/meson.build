@@ -44,7 +44,7 @@ openmp = dependency('openmp')
 
 # Load stxxl as cmake dependency
 cmake = import('cmake')
-rocksdb = cmake.subproject('rocksdb')
+rocksdb = cmake.subproject('rocksdb', cmake_options: ['-DWITH_LZ4=ON'])
 rocksdb_dep = rocksdb.dependency('rocksdb')
 
 include_dirs = include_directories('.')

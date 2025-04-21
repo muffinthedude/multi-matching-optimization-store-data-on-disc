@@ -149,6 +149,18 @@ Infeasible solution. Allows forbidden matchings.
 
     $ mgm -i [IN_FILE] -o [OUT_DIR] --mode [OPT_MODE] --labeling [JSON_FILE] --synchonize-infeasible
 
+### Caching Modes
+To optimize caching different caching techniques were used, with `recent` being the best and default mode
+Switch modes with --cache-mode
+- `recent`: save d-1 most recent gm models to in memory cache when matching d objects
+- `preload`: build cache in parallel to solver
+- `bulk`: build cache with a bulk read infront of every iteration
+
+### Memory Limit
+To limit RAM usage, set maximum RAM the program is allowed to use with option --maximum-memory
+Memory limit can be given in `GB`, `MB` or `B`
+- example: `--maximum-memory 8GB`
+
 
 
 [problem_archive]: https://arxiv.org/abs/2202.03574

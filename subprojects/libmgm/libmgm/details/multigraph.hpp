@@ -94,11 +94,11 @@ class MgmModelBase {
         virtual ~MgmModelBase() = default;
         virtual void save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) = 0;
         virtual std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx) = 0;
-        virtual void bulk_read_to_load_cache(std::vector<GmModelIdx> keys) = 0;
+        virtual void bulk_read_to_load_cache(std::vector<int> current_graph_ids, std::vector<int> next_graph_ids) = 0;
         virtual void bulk_read_to_load_cache(const int& model_id) = 0;
         virtual void swap_caches() = 0;
         virtual void build_caches(long long memory_limit, long long max_memory_model);
-        virtual void save_in_load_cache(const GmModelIdx& model_id, std::mutex& save_to_cache_mutex) {};
+        virtual void save_in_load_cache(const GmModelIdx& model_id, std::mutex& save_to_cache_mutex) = 0;
         bool in_static_cache(const GmModelIdx& model_id) {return this->static_cache.find(model_id) != this->static_cache.end();}
 
         int no_graphs;
@@ -107,6 +107,7 @@ class MgmModelBase {
         
         std::vector<GmModelIdx> model_keys;  // maybe use other data structure here to make sure same key is not saved multiple times (set?)
 
+        virtual void save_in_static_cache(std::shared_ptr<GmModel> gm_model, GmModelIdx idx) {};
         std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> static_cache;
 
         bool bulk_load_mode = false;
@@ -122,11 +123,11 @@ class MgmModel: public MgmModelBase{
     public:
         void save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx);
         std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
-        void bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {};
+        void bulk_read_to_load_cache(std::vector<int> current_graph_ids, std::vector<int> next_graph_ids) {};
         void bulk_read_to_load_cache(const int& model_id) {};
         virtual void swap_caches() {};
         void build_caches(long long memory_limit, long long max_memory_model) override {};
-        
+        virtual void save_in_load_cache(const GmModelIdx& model_id, std::mutex& save_to_cache_mutex) {};
         MgmModel();
 
         std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> models;
@@ -142,16 +143,17 @@ class SqlMgmModel: public MgmModelBase {
         
         void save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx, sqlite3_stmt* insert_to_db_stmt);
         std::shared_ptr<GmModel> read_model_from_db(const GmModelIdx& idx);
-        void bulk_read_to_load_cache(std::vector<GmModelIdx> keys);
+        void bulk_read_to_load_cache(std::vector<int> current_graph_ids, std::vector<int> next_graph_ids);
         void bulk_read_to_load_cache(const int& model_id);
+        void save_in_static_cache(std::shared_ptr<GmModel> gm_model, GmModelIdx idx) override;
 
         std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> cache;  // cache used when bulk loads and parallel caching is not used
 
         // for parallel caching
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> load_cache;
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> process_cache;
-        void swap_caches() {};
-        void save_in_load_cache(const GmModelIdx model_idx, std::mutex& save_to_cache_mutex);
+        void swap_caches();
+        void save_in_load_cache(const GmModelIdx& model_idx, std::mutex& save_to_cache_mutex);
 
         // Rule of five
         ~SqlMgmModel();
@@ -176,6 +178,7 @@ class SqlMgmModel: public MgmModelBase {
         std::queue<sqlite3*> connections;
         std::queue<sqlite3_stmt*> read_pool;
         std::queue<sqlite3_stmt*> write_pool;
+        bool save_in_parallel = false;
 };
 
 class RocksdbMgmModel: public MgmModelBase {
@@ -183,10 +186,10 @@ class RocksdbMgmModel: public MgmModelBase {
         RocksdbMgmModel();
         void save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx);
         std::shared_ptr<GmModel> get_gm_model(const GmModelIdx& idx);
-        void bulk_read_to_load_cache(std::vector<GmModelIdx> keys);
+        void bulk_read_to_load_cache(std::vector<int> current_graph_ids, std::vector<int> next_graph_ids);
         void bulk_read_to_load_cache(const int& model_id);
         void swap_caches();
-        void save_in_load_cache(const GmModelIdx model_idx, std::mutex& save_to_cache_mutex);
+        void save_in_load_cache(const GmModelIdx& model_idx, std::mutex& save_to_cache_mutex);
 
         ~RocksdbMgmModel();
 
@@ -195,6 +198,7 @@ class RocksdbMgmModel: public MgmModelBase {
         std::shared_ptr<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>> process_cache;
         
         int number_of_cached_models = 120;
+        void save_in_static_cache(std::shared_ptr<GmModel> gm_model, GmModelIdx idx) override;
     private:
         void open_db();
         std::string convert_idx_into_string(const GmModelIdx& idx) const;

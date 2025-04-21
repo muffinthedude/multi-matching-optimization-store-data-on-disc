@@ -14,9 +14,7 @@ ArgParser::Arguments ArgParser::parse(int argc, char **argv) {
     try {
         this->app.parse((argc), (argv));
 
-        if (args.max_memory != "unlimited") {
-           args.max_memory_in_bytes = this->parse_memory_string_to_int(args.max_memory); 
-        }
+        args.max_memory_in_bytes = this->parse_memory_string_to_int(args.max_memory);
 
         this->args.input_file   = fs::absolute(this->args.input_file);
         this->args.output_path  = fs::absolute(this->args.output_path);
@@ -75,6 +73,9 @@ ArgParser::Arguments ArgParser::parse(int argc, char **argv) {
 }
 
 long long int ArgParser::parse_memory_string_to_int(std::string& input) {
+    if (input == "unlimited") {
+        return 0;
+    }
     static const std::unordered_map<std::string, double> unit_map = {
         {"B", 1}, {"KB", 1000}, {"MB", 1000000}, {"GB", 1000000000}, {"TB", 1000000000000}
     };

@@ -19,7 +19,7 @@ Runner::Runner(ArgParser::Arguments args) : args(args) {
     
     spdlog::info("Loading model...");
 
-    auto mgmModel = mgm::io::parse_dd_file(args.input_file, args.save_mode, args.parallel_cache_mode, args.max_memory_in_bytes);
+    auto mgmModel = mgm::io::parse_dd_file(args.input_file, args.save_mode, args.cache_mode, args.max_memory_in_bytes);
     this->model = mgmModel;
 
     // If run as a synchronizaiton algorithm, transform the model with the given solution.
@@ -65,7 +65,7 @@ mgm::MgmSolution Runner::run_seqseq()
     solver.generate();
 
     auto cliques = solver.export_CliqueManager();
-    auto local_searcher = mgm::LocalSearcher(cliques, search_order, this->model);
+    auto local_searcher = mgm::LocalSearcher(cliques, search_order, this->model, solver.partial_solution);
     local_searcher.search();
 
     return local_searcher.export_solution();
@@ -90,7 +90,7 @@ mgm::MgmSolution Runner::run_parseq()
     solver.generate();
 
     auto cliques = solver.export_CliqueManager();
-    auto local_searcher = mgm::LocalSearcher(cliques, this->model);
+    auto local_searcher = mgm::LocalSearcher(cliques, this->model, solver.partial_solution);
     local_searcher.search();
 
     return local_searcher.export_solution();
@@ -119,7 +119,7 @@ mgm::MgmSolution Runner::run_incseq()
     solver.generate();
 
     auto cliques = solver.export_CliqueManager();
-    auto local_searcher = mgm::LocalSearcher(cliques, search_order, this->model);
+    auto local_searcher = mgm::LocalSearcher(cliques, search_order, this->model, solver.partial_solution);
     local_searcher.search();
 
     return local_searcher.export_solution();
@@ -148,7 +148,7 @@ mgm::MgmSolution Runner::run_optimal() {
     solver.generate();
 
     auto cliques = solver.export_CliqueManager();
-    auto local_searcher = mgm::LocalSearcher(cliques, search_order, this->model);
+    auto local_searcher = mgm::LocalSearcher(cliques, search_order, this->model, solver.partial_solution);
     local_searcher.search();
 
     auto cliquemanager = local_searcher.export_CliqueManager();
@@ -163,7 +163,7 @@ mgm::MgmSolution Runner::run_optimal() {
         if (improved) {
             cliquetable = swap_local_searcher.export_cliquetable();
             cliquemanager.reconstruct_from(cliquetable);
-            local_searcher = mgm::LocalSearcher(cliquemanager, this->model);
+            local_searcher = mgm::LocalSearcher(cliquemanager, this->model, solver.partial_solution);
 
             improved = local_searcher.search();
         } else {
@@ -224,7 +224,11 @@ mgm::MgmSolution Runner::run_improve_qap()
     mgm::CliqueManager cm(graph_ids, model);
     cm.reconstruct_from(cliquetable);
 
-    auto local_searcher = mgm::LocalSearcher(cm, this->model);
+    mgm::MgmSolution solution(this->model);
+    solution.build_from(cliquetable);
+    solution.update_all_energies();
+
+    auto local_searcher = mgm::LocalSearcher(cm, this->model, solution);
     local_searcher.search();
 
     return local_searcher.export_solution();
@@ -258,7 +262,11 @@ mgm::MgmSolution Runner::run_improveopt()
     mgm::CliqueManager cliquemanager(graph_ids, model);
     cliquemanager.reconstruct_from(cliquetable);
 
-    auto local_searcher = mgm::LocalSearcher(cliquemanager, this->model);
+    mgm::MgmSolution solution(this->model);
+    solution.build_from(cliquetable);
+    solution.update_all_energies();
+
+    auto local_searcher = mgm::LocalSearcher(cliquemanager, this->model, solution);
     local_searcher.search();
 
     cliquetable = local_searcher.export_cliquetable();
@@ -272,7 +280,7 @@ mgm::MgmSolution Runner::run_improveopt()
         if (improved) {
             cliquetable = swap_local_searcher.export_cliquetable();
             cliquemanager.reconstruct_from(cliquetable);
-            local_searcher = mgm::LocalSearcher(cliquemanager, this->model);
+            local_searcher = mgm::LocalSearcher(cliquemanager, this->model, local_searcher.best_solution);
             improved = local_searcher.search();
         } else {
             return swap_local_searcher.export_solution();

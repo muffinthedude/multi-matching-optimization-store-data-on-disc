@@ -50,7 +50,7 @@ class ArgParser {
 
             optimization_mode  mode = optimal;
             mgm::io::disc_save_mode save_mode =  mgm::io::disc_save_mode::no;
-            mgm::io::load_and_process_in_parallel parallel_cache_mode = mgm::io::load_and_process_in_parallel::off;
+            mgm::io::cache_mode cache_mode = mgm::io::cache_mode::recent;
             std::string max_memory = "unlimited";
             long long max_memory_in_bytes;
 
@@ -81,9 +81,10 @@ class ArgParser {
         std::map<std::string, mgm::io::disc_save_mode> save_mode_map   {{"no", mgm::io::disc_save_mode::no},
                                                                         {"sql", mgm::io::disc_save_mode::sql},
                                                                         {"rocksdb", mgm::io::disc_save_mode::rocksdb}};
-        std::map<std::string, mgm::io::load_and_process_in_parallel> parallel_cache_mode_map 
-                                                                       {{"on", mgm::io::load_and_process_in_parallel::on},
-                                                                        {"off", mgm::io::load_and_process_in_parallel::off}};
+        std::map<std::string, mgm::io::cache_mode> cache_mode_map 
+                                                                       {{"recent", mgm::io::cache_mode::recent},
+                                                                        {"preload", mgm::io::cache_mode::preload},
+                                                                        {"bulk", mgm::io::cache_mode::bulk}};
         Arguments args;
 
         CLI::App app{"Multi-Graph Matching Optimizer"};
@@ -167,11 +168,12 @@ class ArgParser {
             ->transform(CLI::CheckedTransformer(save_mode_map, CLI::ignore_case));
         
         [[maybe_unused]]		
-        CLI::Option* parallel_cache_mode  = app.add_option("--parallel-cache-mode", this->args.parallel_cache_mode)
-            ->description("Set if you want to load data simultaneously to the solver running \n"
-                            "on:        loading and processing in parallel\n"
-                            "off:       loading and solving are done sequentially")
-            ->transform(CLI::CheckedTransformer(parallel_cache_mode_map, CLI::ignore_case));
+        CLI::Option* cache_mode  = app.add_option("--cache-mode", this->args.cache_mode)
+            ->description("Set which cache technique you want to use \n"
+                            "recent: when matching d objects, d-1 most recent graph mathing problems are saved\n"
+                            "preload:                                       loading and processing in parallel\n"
+                            "bulk:                       cache is build in one bulk read ahead of each iteration")
+            ->transform(CLI::CheckedTransformer(cache_mode_map, CLI::ignore_case));
         
         [[maybe_unused]]		
         CLI::Option* maximum_memory = app.add_option("--max-memory", this->args.max_memory)

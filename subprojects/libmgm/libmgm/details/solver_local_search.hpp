@@ -14,8 +14,8 @@ class LocalSearcher {
             double reltol = -1.0;
         };
         
-        LocalSearcher(CliqueManager state, std::shared_ptr<MgmModelBase> model);
-        LocalSearcher(CliqueManager state, std::vector<int> search_order, std::shared_ptr<MgmModelBase> model);
+        LocalSearcher(CliqueManager state, std::shared_ptr<MgmModelBase> model, MgmSolution& solution);
+        LocalSearcher(CliqueManager state, std::vector<int> search_order, std::shared_ptr<MgmModelBase> model, MgmSolution& solution);
 
         StoppingCriteria stopping_criteria;
         bool search();
@@ -24,12 +24,15 @@ class LocalSearcher {
         CliqueTable export_cliquetable();
         MgmSolution export_solution();
 
+        MgmSolution best_solution;
+
     private:
         int current_step = 0;
         double previous_energy = INFINITY_COST;
         double current_energy = 0.0;
 
         void iterate();
+        void iterate_bulk();
         void iterate(ParallelDBTasks& parallel_worker);
         void iteration_step(const int& graph_id, const int& idx);
         CliqueManager state;

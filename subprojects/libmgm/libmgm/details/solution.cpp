@@ -32,6 +32,11 @@ GmSolution::GmSolution(std::shared_ptr<GmModel> model, GmModelIdx gmModelIdx): g
 }
 
 GmSolution::GmSolution(std::shared_ptr<MgmModelBase> model, GmModelIdx gmModelIdx): gmModelIdx(gmModelIdx) {
+    this->labeling = std::vector<int>(model->graph1_no_nodes[gmModelIdx], -1); 
+    this->old_labeling = std::vector<int>(model->graph1_no_nodes[gmModelIdx], -1);
+}
+
+GmSolution::GmSolution(std::shared_ptr<MgmModelBase> model, GmModelIdx gmModelIdx, const double& energy): gmModelIdx(gmModelIdx), energy(energy){
     this->labeling = std::vector<int>(model->graph1_no_nodes[gmModelIdx], -1);
     this->old_labeling = std::vector<int>(model->graph1_no_nodes[gmModelIdx], -1);
 }
@@ -135,9 +140,17 @@ double GmSolution::evaluate_and_subtract_old_labelling(const std::shared_ptr<Mgm
 MgmSolution::MgmSolution(std::shared_ptr<MgmModelBase> model) {
     this->model = model;
     gmSolutions.reserve(model->model_keys.size());
-
     for (auto const& key: model->model_keys) {
         gmSolutions[key] = GmSolution(model, key);
+    }
+}
+
+MgmSolution::MgmSolution(std::shared_ptr<MgmModelBase> model, MgmSolution last_solution) {
+    this->model = model;
+    gmSolutions.reserve(model->model_keys.size());
+
+    for (auto const& key: model->model_keys) {
+        gmSolutions[key] = GmSolution(model, key, last_solution.gmSolutions[key].get_energy());
     }
 }
 
@@ -186,6 +199,57 @@ void MgmSolution::build_from(const CliqueTable& cliques, const CliqueTable old_c
                 else {
                     this->gmSolutions[GmModelIdx(g2,g1)].old_labeling[n2] = n1;
                 }
+            }
+        }
+    }
+}
+
+void MgmSolution::extend_solution(const CliqueTable& cliques, const int& new_graph_id, const std::vector<int>& current_graph_ids)
+{
+    for (const auto& c : cliques) {
+        for (const auto& [g1, n1] : c) {
+            for (const auto& [g2, n2] : c) {
+                if (g1 == g2 or g2 != new_graph_id) 
+                    continue;
+                if (g1 < g2) {
+                    this->gmSolutions[GmModelIdx(g1,g2)].labeling[n1] = n2;
+                }
+                else {
+                    this->gmSolutions[GmModelIdx(g2,g1)].labeling[n2] = n1;
+                }
+            }
+        }
+    }
+    for (const int& graph_id: current_graph_ids) {
+        if (graph_id == new_graph_id) {
+            continue;
+        }
+        if (graph_id < new_graph_id) {
+            this->gmSolutions[GmModelIdx(graph_id, new_graph_id)].update_energy(this->model);
+        } else {
+            this->gmSolutions[GmModelIdx(new_graph_id, graph_id)].update_energy(this->model);
+        }
+    }
+}
+
+void MgmSolution::update_solution(const int& new_graph_id) {
+    for (int graph_id = 0; graph_id < this->model->no_graphs; ++graph_id) {
+        if (graph_id == new_graph_id) {
+            continue;
+        }
+        if (graph_id < new_graph_id) {
+            this->gmSolutions[GmModelIdx(graph_id, new_graph_id)].update_energy(this->model);
+        } else {
+            this->gmSolutions[GmModelIdx(new_graph_id, graph_id)].update_energy(this->model);
+        }
+    }
+}
+
+void MgmSolution::update_all_energies() {
+    for (int left_graph_id = 0; left_graph_id < this->model->no_graphs; ++left_graph_id) {
+        for (int right_graph_id = 0; right_graph_id < this->model->no_graphs; ++right_graph_id) {
+            if (left_graph_id < right_graph_id) {
+                this->gmSolutions[GmModelIdx(left_graph_id, right_graph_id)].update_energy(this->model);
             }
         }
     }
@@ -276,7 +340,8 @@ CliqueTable MgmSolution::export_cliquetable(){
 double MgmSolution::evaluate() const {
     double result = 0.0;
     for (const auto& m : this->gmSolutions) {
-        result += m.second.evaluate(this->model);
+        // result += m.second.evaluate(this->model);
+        result += m.second.get_energy();
     }
     return result;
 }

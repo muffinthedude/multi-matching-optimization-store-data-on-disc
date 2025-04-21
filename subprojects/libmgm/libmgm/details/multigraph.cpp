@@ -5,6 +5,12 @@
 #include <fstream>
 #include <cstdlib>
 
+#include "rocksdb/db.h"
+#include "rocksdb/options.h"
+#include "rocksdb/table.h"
+#include "rocksdb/filter_policy.h"
+#include "rocksdb/compression_type.h"
+
 namespace mgm {
     
 Graph::Graph(int id, int no_nodes) : id(id), no_nodes(no_nodes) {};
@@ -51,6 +57,7 @@ void GmModel::add_edge(int assignment1_node1, int assignment1_node2, int assignm
 }
 
 void GmModel::serialize_to_binary(std::string& result_string) const {
+    spdlog::info("Serializing Model...");
     std::ostringstream output_stream;
         {
             
@@ -59,6 +66,7 @@ void GmModel::serialize_to_binary(std::string& result_string) const {
             
         }
     result_string = output_stream.str();
+    spdlog::info("Serialized Model!");
 }
 
 int GmModel::estimate_memory_consumption() {
@@ -80,6 +88,7 @@ int GmModel::estimate_memory_consumption() {
 // Serialization utils
 
 void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModel> gmModel) {
+    spdlog::info("Serializing Model...");
     std::ostringstream output_stream;
         {
             
@@ -88,15 +97,18 @@ void serialize_to_binary(std::string& result_string, std::shared_ptr<GmModel> gm
             
         }
     result_string = output_stream.str();
+    spdlog::info("Serialized Model!");
 }
 
 std::shared_ptr<GmModel> deserialize_serialized_model(std::string& serialized_model) {
+    spdlog::info("Deserializing Model...");
     std::shared_ptr<GmModel> gmModel;
     {
         std::istringstream iss(serialized_model);
         cereal::BinaryInputArchive iarchive(iss);
         iarchive(gmModel); 
     }
+    spdlog::info("Deserialized Model");
     return gmModel;
 }
 
@@ -111,17 +123,39 @@ void MgmModelBase::build_caches(long long memory_limit, long long max_memory_mod
             spdlog::warn("Not enough RAM for efficicient parallel mode. Parallel Mode turned off!");  // not enough space to use parallel loading efficiently (Warning?)
         } else {
             max_number_of_models_in_memory -= 2 * (this->no_graphs - 1);
-            this->distribute_models_in_static_cache_while_in_parallel_mode(max_number_of_models_in_memory);  // TODO: this is unnecessary just load them normaly, no need to distribute
+            this->distribute_models_in_static_cache_while_in_parallel_mode(max_number_of_models_in_memory);
         }
     }
     if (!this->paralel_loading_mode) {
+        int number_of_models_in_static_cache = this->static_cache.size();
         if (max_number_of_models_in_memory < this->no_graphs - 1) {
+            this->static_cache = std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>();
             spdlog::warn("Not enough RAM for efficicient seqseq mode. Programm will slow down considerably!");
-        } else if (max_number_of_models_in_memory + 2 >= this->model_keys.size() ){
-            this->distribute_models_in_static_cache_while_in_parallel_mode(max_number_of_models_in_memory + 2);
-        } else {
-            max_number_of_models_in_memory -= this->no_graphs - 1;
-            this->distribute_models_in_static_cache_while_in_parallel_mode(max_number_of_models_in_memory);
+        } else if (max_number_of_models_in_memory >= this->model_keys.size() ){
+            if (number_of_models_in_static_cache < this->model_keys.size()) {
+                for (const GmModelIdx& idx: this->model_keys) {
+                    if (this->static_cache.find(idx) != this->static_cache.end()) {
+                        this->static_cache[idx] = this->get_gm_model(idx);
+                    }
+                }
+            }  // load all models
+
+        } else if (max_number_of_models_in_memory - number_of_models_in_static_cache <  this->no_graphs - 1){
+            auto static_cache_it = this->static_cache.begin();
+            while (max_number_of_models_in_memory - number_of_models_in_static_cache <  this->no_graphs - 1) {
+                this->save_gm_model(static_cache_it->second, static_cache_it->first);
+                static_cache_it = this->static_cache.erase(static_cache_it);
+            }
+        } else if (max_number_of_models_in_memory - number_of_models_in_static_cache >  this->no_graphs - 1) {
+            auto static_cache_it = this->static_cache.begin();
+            for (const GmModelIdx& idx: this->model_keys) {
+                if (max_number_of_models_in_memory - number_of_models_in_static_cache == this->no_graphs - 1) {
+                    break;
+                }
+                if (this->static_cache.find(idx) != this->static_cache.end()) {
+                    this->static_cache[idx] = this->get_gm_model(idx);
+                }
+            }
         }
     }
  };
@@ -194,6 +228,8 @@ std::shared_ptr<GmModel> MgmModel::get_gm_model(const GmModelIdx& idx) {
 // SqlMgmModel
 
 SqlMgmModel::SqlMgmModel() {
+    sqlite3_config(SQLITE_CONFIG_MULTITHREAD);
+    sqlite3_initialize();
     this->db = this->open_db();
     this->create_table();
     this->set_up_write_statement();
@@ -207,7 +243,7 @@ SqlMgmModel::SqlMgmModel() {
 sqlite3* SqlMgmModel::open_db() {
     sqlite3* db;
     int rc;
-    rc = sqlite3_open("./models_sql.db", &db);
+    rc = sqlite3_open("/mnt/d/models_sql.db", &db);
 
     if(rc) {
         std::cerr << "Can't open database: " << sqlite3_errmsg(db) << ", file inaccessible." << "\n";
@@ -215,7 +251,17 @@ sqlite3* SqlMgmModel::open_db() {
     }
 
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
-    std::cout << "WAL mode enabled." << std::endl;
+
+    sqlite3_stmt* stmt;
+    const char* journal_mode = nullptr;
+
+    if (sqlite3_prepare_v2(db, "PRAGMA journal_mode;", -1, &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            journal_mode = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+            std::cout << "Current journal_mode: " << journal_mode << std::endl;
+        }
+    }
+    sqlite3_finalize(stmt);
 
     return db;
 }
@@ -234,7 +280,7 @@ void SqlMgmModel::create_table() {
 }
 
 void SqlMgmModel::set_up_write_statement(){
-    const char* sql_insert = "INSERT OR REPLACE INTO models (g1_id, g2_id, gm_model) VALUES (?, ?, ?)";
+    const char* sql_insert = "INSERT OR REPLACE INTO models (g1_id, g2_id, gm_model) VALUES (?, ?, ?);";
     int rc = sqlite3_prepare_v2(this->db, sql_insert, -1, &(this->insert_stmt), NULL);
     if (rc != SQLITE_OK) {
         std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
@@ -269,7 +315,7 @@ SqlMgmModel::~SqlMgmModel() {
         this->read_pool.pop();
         this->write_pool.pop();
     }
-    this->delete_table();
+    // this->delete_table();
     sqlite3_close(db);
     
 }
@@ -288,7 +334,7 @@ void SqlMgmModel::delete_table() {
 }
 
 void SqlMgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) {
-    if (!this->write_pool.empty()) {
+    if (this->save_in_parallel) {
         sqlite3* db_connection;
         sqlite3_stmt* write_stmt_of_connection;
             {
@@ -313,8 +359,10 @@ void SqlMgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModel
 }
 
 void SqlMgmModel::save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx, sqlite3_stmt* insert_to_db_stmt) {
+    std::string serialized_model;
+    serialize_to_binary(serialized_model, gm_model);
+    spdlog::info("Saving to db...");
     // bind statement
-    sqlite3_exec(db, "BEGIN CONCURRENT;", nullptr, nullptr, nullptr);
     int rc = sqlite3_bind_int(insert_to_db_stmt, 1, idx.first);
     if (rc != SQLITE_OK) {
         std::cerr << "Failed to bind index 1: " << sqlite3_errmsg(db) << std::endl;
@@ -325,8 +373,6 @@ void SqlMgmModel::save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmMo
         std::cerr << "Failed to bind index 2: " << sqlite3_errmsg(db) << std::endl;
         exit(1);
     }
-    std::string serialized_model;
-    serialize_to_binary(serialized_model, gm_model);
     rc = sqlite3_bind_blob(insert_to_db_stmt, 3, serialized_model.data(), serialized_model.size(), SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) {
         std::cerr << "Failed to bind blob: " << sqlite3_errmsg(db) << std::endl;
@@ -335,7 +381,7 @@ void SqlMgmModel::save_model_to_db(std::shared_ptr<GmModel> gm_model, const GmMo
     // write into db and then reset the statement again
     rc = sqlite3_step(insert_to_db_stmt);
     rc = sqlite3_reset(insert_to_db_stmt);
-    sqlite3_exec(db, "BEGIN CONCURRENT;", nullptr, nullptr, nullptr);
+    spdlog::info("Saved to db!");
 }
 
 std::shared_ptr<GmModel> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
@@ -352,7 +398,7 @@ std::shared_ptr<GmModel> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
     }
     std::shared_ptr<GmModel> gmModel = this->read_model_from_db(idx);
     if (not this->paralel_loading_mode) {
-        if (this->cache_queue.size() == this->number_of_cached_models) {
+        if (this->cache_queue.size() == this->no_graphs-1) {
             GmModelIdx idxOfModelToBeErased = this->cache_queue.front();
             this->cache.erase(idxOfModelToBeErased);
             this->cache_queue.pop();
@@ -365,6 +411,7 @@ std::shared_ptr<GmModel> SqlMgmModel::get_gm_model(const GmModelIdx& idx) {
 
 std::shared_ptr<GmModel> SqlMgmModel::read_model_from_db(const GmModelIdx& idx) {
     // bind to statement
+    spdlog::info("Reading model with id ({}, {}) from db...", idx.first, idx.second);
     int rc = sqlite3_bind_int(this->read_stmt, 1, idx.first);
     if (rc != SQLITE_OK) {
         std::cerr << "Failed to bind index 1: " << sqlite3_errmsg(db) << std::endl;
@@ -385,11 +432,12 @@ std::shared_ptr<GmModel> SqlMgmModel::read_model_from_db(const GmModelIdx& idx) 
         std::cerr << "No data found!" << "\n";
     }
     rc = sqlite3_reset(this->read_stmt);
+    spdlog::info("Read model from db!");
     std::shared_ptr<GmModel> gmModelPtr = deserialize_serialized_model(read_serialized_model);
     return gmModelPtr;
 }
 
-void SqlMgmModel::save_in_load_cache(const GmModelIdx model_idx, std::mutex& save_to_cache_mutex) {
+void SqlMgmModel::save_in_load_cache(const GmModelIdx& model_idx, std::mutex& save_to_cache_mutex) {
     sqlite3_stmt* read_stmt_of_connection;
     {
         std::lock_guard<std::mutex> lock(this->connection_mutex);
@@ -416,12 +464,12 @@ void SqlMgmModel::save_in_load_cache(const GmModelIdx model_idx, std::mutex& sav
     } else {
         std::cerr << "No data found!" << "\n";
     }
-    rc = sqlite3_reset(read_stmt_of_connection);
     std::shared_ptr<GmModel> gmModel = deserialize_serialized_model(read_serialized_model);
     {
         std::lock_guard<std::mutex> lock(save_to_cache_mutex);
         (*this->load_cache)[model_idx] = gmModel;
     }
+    rc = sqlite3_reset(read_stmt_of_connection);
     {
         std::lock_guard<std::mutex> lock(this->connection_mutex);
         this->read_pool.push(read_stmt_of_connection);
@@ -454,7 +502,22 @@ void SqlMgmModel::setup_db_connections_for_parallel_tasks(const int& number_of_c
     }
 }
 
-void SqlMgmModel::bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {  // currently unused
+void SqlMgmModel::save_in_static_cache(std::shared_ptr<GmModel> gm_model, GmModelIdx idx) {
+    this->model_keys.push_back(idx);
+    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
+    this->static_cache[idx] = gm_model;
+}
+
+void SqlMgmModel::bulk_read_to_load_cache(std::vector<int> current_graph_ids, std::vector<int> next_graph_ids) {  // currently unused
+    std::vector<GmModelIdx> keys;
+    keys.reserve(current_graph_ids.size() * next_graph_ids.size());
+    for (const int& current_graph_id: current_graph_ids) {
+        for (const int& next_graph_id: next_graph_ids) {
+            keys.emplace_back(
+                (current_graph_id < next_graph_id)? GmModelIdx(current_graph_id, next_graph_id): GmModelIdx(next_graph_id, current_graph_id)
+            );
+        }
+    }
     // build statement
     std::string sql_query = "SELECT * FROM models WHERE";
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -494,6 +557,11 @@ void SqlMgmModel::bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {  // cu
         (*this->load_cache)[GmModelIdx(g1_id, g2_id)] = deserialize_serialized_model(read_serialized_model);
     }
     sqlite3_finalize(sql_stmt);
+}
+
+void SqlMgmModel::swap_caches() {
+    std::swap(this->load_cache, this->process_cache);
+    this->load_cache->clear();
 }
 
 void SqlMgmModel::bulk_read_to_load_cache(const int& model_id) {  // currently unused
@@ -537,6 +605,7 @@ RocksdbMgmModel::RocksdbMgmModel() {
     this->write_options = rocksdb::WriteOptions();
     this->write_options.sync = false;  // supposed to improve performance
     this->read_options = rocksdb::ReadOptions();
+    this->read_options.fill_cache = false;
     std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> load;
     this->load_cache = std::make_shared<std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash>>(load);
     std::unordered_map<GmModelIdx, std::shared_ptr<GmModel>, GmModelIdxHash> process;
@@ -545,8 +614,24 @@ RocksdbMgmModel::RocksdbMgmModel() {
 
 void RocksdbMgmModel::open_db() {
     rocksdb::Options options;
+    options.max_open_files = 18000;
     options.create_if_missing = true;
-    rocksdb::Status status = rocksdb::DB::Open(options, "modelsdb", &(this->db));
+    options.compression = rocksdb::kLZ4Compression;
+    options.max_background_jobs = 6;
+    options.bytes_per_sync = 1048576 * 100;
+    options.compaction_pri = rocksdb::kMinOverlappingRatio;
+    // Set up table options and enable a bloom filter.
+    rocksdb::BlockBasedTableOptions table_options;
+    table_options.enable_index_compression = false;
+    table_options.cache_index_and_filter_blocks = true;
+    // The parameter specifies bits per key, e.g., 10 bits per key.
+    table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(20, false));
+
+    // Assign the table options to the Options using a new block-based table factory.
+    options.table_factory.reset(NewBlockBasedTableFactory(table_options));
+
+    std::string db_path = "/mnt/d/modelsdb";
+    rocksdb::Status status = rocksdb::DB::Open(options, db_path, &(this->db));
     if (!status.ok()) {
         std::cerr << "Failed to open RocksDB at path 'modelsdb': " << status.ToString() << std::endl;
         exit(1);
@@ -555,21 +640,23 @@ void RocksdbMgmModel::open_db() {
 
 RocksdbMgmModel::~RocksdbMgmModel() {
     delete this->db;
-    rocksdb::Status status = rocksdb::DestroyDB("modelsdb", rocksdb::Options());
-    if (!status.ok()) {
-        std::cerr << "Error deleting database: " << status.ToString() << std::endl;
-    }
+    // rocksdb::Status status = rocksdb::DestroyDB("modelsdb", rocksdb::Options());
+    // if (!status.ok()) {
+    //     std::cerr << "Error deleting database: " << status.ToString() << std::endl;
+    // }
 }
 
 void RocksdbMgmModel::save_gm_model(std::shared_ptr<GmModel> gm_model, const GmModelIdx& idx) {
     std::string serialized_model;
     serialize_to_binary(serialized_model, gm_model);
+    spdlog::info("Saving to db...");
     rocksdb::Status status = db->Put(this->write_options, this->convert_idx_into_string(idx), serialized_model);
     if (!status.ok()) {
         std::cerr << "Failed to write binary data to database: " << status.ToString() << std::endl;
         delete db;
         return;
     }
+    spdlog::info("Saved to db!");
     this->model_keys.push_back(idx);
     this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
 }
@@ -596,13 +683,15 @@ std::shared_ptr<GmModel> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
     }
     
     std::string retrieved_serialized_model;
+    spdlog::info("Reading model with id ({}, {}) from db...", idx.first, idx.second);
     rocksdb::Status status = db->Get(this->read_options, this->convert_idx_into_string(idx), &retrieved_serialized_model);
     if (!status.ok()) {
         std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
     }
+    spdlog::info("Read model from db!");
     std::shared_ptr<GmModel> gmModel = deserialize_serialized_model(retrieved_serialized_model);
     if (not this->paralel_loading_mode) {
-        if (this->cache_queue.size() == this->number_of_cached_models) {
+        if (this->cache_queue.size() == this->no_graphs-1) {
             GmModelIdx idxOfModelToBeErased = this->cache_queue.front();
             this->cache.erase(idxOfModelToBeErased);
             this->cache_queue.pop();
@@ -614,7 +703,7 @@ std::shared_ptr<GmModel> RocksdbMgmModel::get_gm_model(const GmModelIdx& idx) {
     return gmModel;
 }
 
-void RocksdbMgmModel::save_in_load_cache(const GmModelIdx model_idx, std::mutex& save_to_cache_mutex) {
+void RocksdbMgmModel::save_in_load_cache(const GmModelIdx& model_idx, std::mutex& save_to_cache_mutex) {
     // get model from db
     std::string retrieved_serialized_model;
     rocksdb::Status status = db->Get(this->read_options, this->convert_idx_into_string(model_idx), &retrieved_serialized_model);
@@ -633,7 +722,22 @@ void RocksdbMgmModel::swap_caches() {
     this->load_cache->clear();
 }
 
-void RocksdbMgmModel::bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {  // currently unused
+void RocksdbMgmModel::save_in_static_cache(std::shared_ptr<GmModel> gm_model, GmModelIdx idx) {
+    this->model_keys.push_back(idx);
+    this->graph1_no_nodes[idx] = gm_model->graph1.no_nodes;
+    this->static_cache[idx] = gm_model;
+}
+
+void RocksdbMgmModel::bulk_read_to_load_cache(std::vector<int> current_graph_ids, std::vector<int> next_graph_ids) {  // currently unused
+    std::vector<GmModelIdx> keys;
+    keys.reserve(current_graph_ids.size() * next_graph_ids.size());
+    for (const int& current_graph_id: current_graph_ids) {
+        for (const int& next_graph_id: next_graph_ids) {
+            keys.emplace_back(
+                (current_graph_id < next_graph_id)? GmModelIdx(current_graph_id, next_graph_id): GmModelIdx(next_graph_id, current_graph_id)
+            );
+        }
+    }
     // convert keys to string
     std::vector<rocksdb::Slice> slice_keys(keys.size());
     std::vector<std::string> string_storage(keys.size());
@@ -644,7 +748,19 @@ void RocksdbMgmModel::bulk_read_to_load_cache(std::vector<GmModelIdx> keys) {  /
     std::vector<std::string> values(keys.size());
     this->db->MultiGet(this->read_options, slice_keys, &values);
     for (size_t i = 0; i < keys.size(); ++i) {
-        (*this->load_cache)[keys[i]] = deserialize_serialized_model(values[i]);
+        try {
+            (*this->load_cache)[keys[i]] = deserialize_serialized_model(values[i]);
+        } catch (const cereal::Exception& ce) {
+            std::cerr << "Cereal exception caught: " << ce.what() << std::endl;
+            spdlog::info("Reloading model ({}, {})", keys[i].first, keys[i].second);
+            std::string retrieved_serialized_model;
+            rocksdb::Status status = db->Get(this->read_options, this->convert_idx_into_string(keys[i]), &retrieved_serialized_model);
+            if (!status.ok()) {
+                std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
+            }
+            spdlog::info("Read model from db!");
+            (*this->load_cache)[keys[i]] = deserialize_serialized_model(retrieved_serialized_model);
+        }
     }
 }
 
@@ -668,7 +784,20 @@ void RocksdbMgmModel::bulk_read_to_load_cache(const int& model_id) {  // current
         if (model_id == other_model_id) {
             continue;
         }
-        (*this->load_cache)[(model_id < other_model_id) ? GmModelIdx(model_id, other_model_id): GmModelIdx(other_model_id, model_id)] = deserialize_serialized_model(values[serialized_model_index]);
+        try {
+            (*this->load_cache)[(model_id < other_model_id) ? GmModelIdx(model_id, other_model_id): GmModelIdx(other_model_id, model_id)] = deserialize_serialized_model(values[serialized_model_index]);
+        } catch (const cereal::Exception& ce) {
+            std::cerr << "Cereal exception caught: " << ce.what() << std::endl;
+            GmModelIdx idx = (model_id < other_model_id) ? GmModelIdx(model_id, other_model_id): GmModelIdx(other_model_id, model_id);
+            spdlog::info("Reloading model ({}, {})", idx.first, idx.second);
+            std::string retrieved_serialized_model;
+            rocksdb::Status status = db->Get(this->read_options, this->convert_idx_into_string(idx), &retrieved_serialized_model);
+            if (!status.ok()) {
+                std::cerr << "Failed to read binary data from database: " << status.ToString() << std::endl;
+            }
+            spdlog::info("Read model from db!");
+            (*this->load_cache)[idx] = deserialize_serialized_model(retrieved_serialized_model);
+        }
         ++serialized_model_index;
     }
 };
@@ -702,29 +831,30 @@ void ParallelDBTasks::work_on_tasks_for_solver(std::function<void()> solver_func
     this->add_task(solver_function);
     for (const int& graph_id: graph_ids) {
         GmModelIdx model_id = (graph_id < preload_graph_id)? GmModelIdx(graph_id, preload_graph_id): GmModelIdx(preload_graph_id, graph_id);
-        if (!this->in_static_cache_map[model_id]) {
+        // if (!this->in_static_cache_map[model_id]) {
             tasks.push(
                 [this, model_id]() {
                     this->model->save_in_load_cache(model_id, this->cache_mutex);
                 }
             );
-        }; 
+        // }; 
     }
     this->work_on_tasks();
 }
 
 void ParallelDBTasks::work_on_tasks_for_search(std::function<void()> search_function, const int& next_graph_id) {
+    spdlog::info("Starting preload for {}", next_graph_id);
     this->add_task(search_function);
     for (int id = 0; id < model->no_graphs; ++id) {
         if (id != next_graph_id) {
             GmModelIdx model_id = (id < next_graph_id)? GmModelIdx(id, next_graph_id): GmModelIdx(next_graph_id, id);
-            if (!this->in_static_cache_map[model_id]) {
+            // if (!this->in_static_cache_map[model_id]) {
                 tasks.push(
                     [this, model_id]() {
                         this->model->save_in_load_cache(model_id, this->cache_mutex);
                     }
                 );
-            }; 
+            // }; 
         }
     }
     this->work_on_tasks();
